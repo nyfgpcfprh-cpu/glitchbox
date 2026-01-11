@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="ApiTask" extends="Task">
+  <interface>
+    <field id="url" type="string" />
+    <field id="response" type="string" />
+    <field id="responseCode" type="integer" />
+  </interface>
+
+  <script type="text/brightscript">
+    <![CDATA[
+    sub init()
+      m.top.functionName = "makeRequest"
+    end sub
+
+    sub makeRequest()
+      request = CreateObject("roUrlTransfer")
+      request.SetUrl(m.top.url)
+      request.AddHeader("Accept", "application/json")
+      request.AddHeader("Content-Type", "application/json")
+      request.SetCertificatesFile("common:/certs/ca-bundle.crt")
+      request.InitClientCertificates()
+
+      port = CreateObject("roMessagePort")
+      request.SetPort(port)
+
+      if request.AsyncGetToString() then
+        while true
+          msg = wait(5000, port)
+          if type(msg) = "roUrlEvent" then
+            code = msg.GetResponseCode()
+            m.top.responseCode = code
+
+            if code = 200 then
+              m.top.response = msg.GetString()
+            else
+              dt = CreateObject("roDateTime")
+              m.top.response = "ERROR:" + code.toStr() + ":" + dt.AsSeconds().toStr()
+            end if
+            exit while
+
+          else if msg = invalid then
+            ' Timeout
+            dt = CreateObject("roDateTime")
+            m.top.responseCode = 0
+            m.top.response = "TIMEOUT:" + dt.AsSeconds().toStr()
+            exit while
+          end if
+        end while
+      else
+        dt = CreateObject("roDateTime")
+        m.top.responseCode = -1
+        m.top.response = "ERROR:-1:" + dt.AsSeconds().toStr()
+      end if
+    end sub
+    ]]>
+  </script>
+</component>

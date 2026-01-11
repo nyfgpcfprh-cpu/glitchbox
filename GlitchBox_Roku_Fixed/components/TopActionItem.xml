@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="TopActionItem" extends="Group">
+  <interface>
+    <field id="itemContent" type="node" />
+  </interface>
+
+  <children>
+    <Rectangle id="focusFrame" width="204" height="84" translation="[-2, -2]" color="#FFD54A" opacity="0.0" />
+    <Rectangle id="bg" width="200" height="80" color="#1C1C22" />
+    <Label id="label" translation="[16, 24]" text="" font="font:SmallSystemFont" color="#FFFFFF" />
+  </children>
+
+  <script type="text/brightscript" uri="pkg:/components/TopActionItem.brs" />
+</component>

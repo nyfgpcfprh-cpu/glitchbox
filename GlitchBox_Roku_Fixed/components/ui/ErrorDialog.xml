@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="ErrorDialog" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/ui/ErrorDialog.brs" />
+  <interface>
+    <field id="message" type="string" />
+    <field id="buttonSelected" type="integer" />
+  </interface>
+
+  <children>
+    <Rectangle id="bg" width="1280" height="720" color="#000000" opacity="0.7" />
+    <Label id="label" translation="[60, 320]" text="Error" font="font:MediumSystemFont" color="#FFFFFF" />
+    <ButtonGroup id="buttons" translation="[60, 380]" />
+  </children>
+</component>

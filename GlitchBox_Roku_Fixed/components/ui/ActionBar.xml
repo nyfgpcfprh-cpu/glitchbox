@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="ActionBar" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/ui/ActionBar.brs" />
+  <interface>
+    <field id="actions" type="array" />
+    <field id="actionSelected" type="integer" />
+  </interface>
+
+  <children>
+    <Label id="title" translation="[0, 0]" text="Actions" font="font:MediumSystemFont" color="#FFFFFF" />
+  </children>
+</component>

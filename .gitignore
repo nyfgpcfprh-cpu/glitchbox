@@ -1,0 +1,5 @@
+.DS_Store
+
+# Media + generated metadata
+/data/*
+!/data/.gitkeep

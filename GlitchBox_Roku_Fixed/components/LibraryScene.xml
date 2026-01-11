@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="LibraryScene" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/LibraryScene.brs" />
+  <interface>
+    <field id="libraryId" type="string" />
+    <field id="selectedItem" type="assocarray" />
+  </interface>
+
+  <children>
+    <Rectangle id="bg" width="1280" height="720" color="#0B0B10" />
+    <Label id="title" translation="[60, 40]" text="Library (stub)" font="font:LargeSystemFont" color="#FFFFFF" />
+  </children>
+</component>

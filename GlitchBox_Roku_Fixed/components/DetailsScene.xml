@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="DetailsScene" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/services/ProgressService.brs" />
+  <script type="text/brightscript" uri="pkg:/components/DetailsScene.brs" />
+  <interface>
+    <field id="item" type="assocarray" />
+    <field id="playRequested" type="assocarray" />
+    <field id="backRequested" type="boolean" />
+  </interface>
+
+  <children>
+    <Rectangle id="bg" width="1280" height="720" color="#0B0B10" />
+
+    <Label id="title" translation="[60, 40]" text="Details" font="font:LargeSystemFont" color="#FFFFFF" />
+    <Label id="itemTitle" translation="[60, 90]" text="" font="font:MediumSystemFont" color="#CCCCCC" />
+
+    <Poster id="poster" translation="[60, 140]" width="360" height="200" loadWidth="360" loadHeight="200" />
+
+    <Label id="metaLine" translation="[440, 140]" text="" font="font:SmallSystemFont" color="#B8B8C5" />
+    <Label id="description" translation="[440, 170]" width="780" height="120" text="" font="font:SmallSystemFont" color="#CCCCCC" numLines="4" wrap="true" />
+    <Label id="resumeLabel" translation="[440, 300]" text="" font="font:SmallSystemFont" color="#B8B8C5" />
+
+    <ButtonGroup
+      id="actions"
+      translation="[60, 340]" />
+
+    <Label id="status" translation="[60, 680]" text="" font="font:SmallSystemFont" color="#B8B8C5" />
+  </children>
+</component>

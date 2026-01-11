@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="PosterGrid" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/ui/PosterGrid.brs" />
+  <interface>
+    <field id="content" type="node" />
+    <field id="itemSelected" type="assocarray" />
+  </interface>
+
+  <children>
+    <Label id="title" translation="[0, 0]" text="" font="font:MediumSystemFont" color="#FFFFFF" />
+
+    <MarkupGrid
+      id="grid"
+      translation="[0, 40]"
+      focusable="true"
+      numColumns="6"
+      itemSpacing="[18, 18]"
+      itemSize="[200, 300]" />
+  </children>
+</component>

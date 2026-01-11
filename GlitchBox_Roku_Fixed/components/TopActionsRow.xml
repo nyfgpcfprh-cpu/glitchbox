@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="TopActionsRow" extends="Group">
+  <interface>
+    <field id="actions" type="array" />
+    <field id="actionSelected" type="integer" />
+  </interface>
+
+  <children>
+    <RowList
+      id="list"
+      translation="[0, 0]"
+      rowItemSize="[[200, 80]]"
+      rowHeights="[80]"
+      itemSpacing="[20, 0]"
+      rowItemSpacing="[[20, 0]]"
+      showRowLabel="[false]"
+      drawFocusFeedback="true"
+      vertFocusAnimationStyle="floatingFocus" />
+  </children>
+
+  <script type="text/brightscript" uri="pkg:/components/TopActionsRow.brs" />
+</component>

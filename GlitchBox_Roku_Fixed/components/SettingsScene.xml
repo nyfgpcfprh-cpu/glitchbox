@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="SettingsScene" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/SettingsScene.brs" />
+  <interface>
+    <field id="serverHost" type="string" />
+    <field id="syncRequested" type="boolean" />
+    <field id="syncStatus" type="string" />
+    <field id="lastSync" type="string" />
+    <field id="backRequested" type="boolean" />
+  </interface>
+
+  <children>
+    <Rectangle id="bg" width="1280" height="720" color="#0B0B10" />
+    <Label id="title" translation="[60, 40]" text="Settings" font="font:LargeSystemFont" color="#FFFFFF" />
+
+    <Label id="serverLabel" translation="[60, 120]" text="Server: not set" font="font:MediumSystemFont" color="#CCCCCC" />
+    <Label id="connectionLabel" translation="[60, 140]" text="Connection: not tested" font="font:SmallSystemFont" color="#B8B8C5" />
+    <Label id="userLabel" translation="[60, 180]" text="User: not set" font="font:SmallSystemFont" color="#B8B8C5" />
+    <Label id="userSwitchHint" translation="[60, 195]" text="Use Create User to switch" font="font:SmallSystemFont" color="#7D7D88" />
+    <Label id="syncLabel" translation="[60, 205]" text="Last Sync: never" font="font:SmallSystemFont" color="#B8B8C5" />
+    <Label id="syncStatusLabel" translation="[60, 225]" text="Sync Status: idle" font="font:SmallSystemFont" color="#B8B8C5" />
+
+    <ButtonGroup
+      id="actions"
+      translation="[60, 260]" />
+
+    <Label id="userHistoryLabel" translation="[340, 120]" text="User History" font="font:MediumSystemFont" color="#CCCCCC" />
+    <LabelList
+      id="userHistory"
+      translation="[340, 160]"
+      itemSize="[400, 40]"
+      itemSpacing="[0, 6]"
+      font="font:MediumSystemFont"
+      color="#FFFFFF"
+      focusedColor="#FFD54A"
+      visible="true" />
+
+    <Label id="aboutLabel" translation="[60, 520]" text="GlitchBox Roku Client" font="font:SmallSystemFont" color="#B8B8C5" />
+    <Label id="versionLabel" translation="[60, 545]" text="Version: 0.1" font="font:SmallSystemFont" color="#7D7D88" />
+  </children>
+</component>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="PosterRow" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/ui/PosterRow.brs" />
+  <interface>
+    <field id="content" type="node" />
+    <field id="rowItemSelected" type="assocarray" />
+  </interface>
+
+  <children>
+    <Label id="title" translation="[0, 0]" text="Row" font="font:MediumSystemFont" color="#FFFFFF" />
+  </children>
+</component>

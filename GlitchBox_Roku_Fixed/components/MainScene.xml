@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="MainScene" extends="Scene">
+  <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+
+  <children>
+    <HomeScene id="homeScene" visible="true" />
+    <DetailsScene id="detailsScene" visible="false" />
+    <LibraryScene id="libraryScene" visible="false" />
+    <PlayerScene id="playerScene" visible="false" />
+    <SettingsScene id="settingsScene" visible="false" />
+    <SearchScene id="searchScene" visible="false" />
+  </children>
+</component>

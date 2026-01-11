@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="LoadingOverlay" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/ui/LoadingOverlay.brs" />
+  <interface>
+    <field id="message" type="string" />
+  </interface>
+
+  <children>
+    <Rectangle id="bg" width="1280" height="720" color="#000000" opacity="0.6" />
+    <Label id="label" translation="[60, 360]" text="Loading" font="font:MediumSystemFont" color="#FFFFFF" />
+  </children>
+</component>

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="PlayerScene" extends="Group">
+  <script type="text/brightscript" uri="pkg:/components/services/ProgressService.brs" />
+  <script type="text/brightscript" uri="pkg:/components/PlayerScene.brs" />
+  <interface>
+    <field id="playbackItem" type="assocarray" />
+    <field id="queue" type="array" />
+    <field id="queueIndex" type="integer" />
+    <field id="actionSelected" type="string" />
+    <field id="backRequested" type="boolean" />
+  </interface>
+
+  <children>
+    <Video
+      id="video"
+      width="1280"
+      height="720"
+      enableUI="false"
+      enableTrickPlay="true" />
+
+    <Group id="titleOverlay" visible="false">
+      <Rectangle id="titleBg" width="1280" height="70" color="#000000" opacity="0.6" />
+      <Label id="titleLabel" translation="[60, 22]" text="" font="font:MediumSystemFont" color="#FFFFFF" />
+    </Group>
+
+    <Group id="nowPlayingOverlay" visible="false">
+      <Rectangle id="nowPlayingBg" width="1280" height="70" color="#000000" opacity="0.6" />
+      <Label id="nowPlayingLabel" translation="[60, 22]" text="" font="font:SmallSystemFont" color="#FFFFFF" />
+      <Label id="nowPlayingTime" translation="[1080, 22]" text="" font="font:SmallSystemFont" color="#FFFFFF" horizAlign="right" width="140" />
+    </Group>
+
+    <Group id="actionOverlay" visible="false">
+      <Rectangle id="actionBg" width="1280" height="120" color="#000000" opacity="0.7" />
+      <Label id="actionTitle" translation="[60, 18]" text="Actions" font="font:SmallSystemFont" color="#FFFFFF" />
+      <ButtonGroup
+        id="actionBar"
+        translation="[60, 50]" />
+    </Group>
+
+    <Group id="errorOverlay" visible="false">
+      <Rectangle id="errorBg" width="1280" height="100" color="#000000" opacity="0.8" />
+      <Label id="errorLabel" translation="[60, 30]" text="Playback error" font="font:SmallSystemFont" color="#FFFFFF" />
+      <ButtonGroup id="errorActions" translation="[700, 25]" />
+    </Group>
+
+    <Group id="resumeOverlay" visible="false">
+      <Rectangle id="resumeBg" width="1280" height="100" color="#000000" opacity="0.8" />
+      <Label id="resumeLabel" translation="[60, 30]" text="" font="font:SmallSystemFont" color="#FFFFFF" />
+      <ButtonGroup id="resumeActions" translation="[700, 25]" />
+    </Group>
+
+    <Group id="queueOverlay" visible="false">
+      <Rectangle id="queueBg" width="1280" height="120" color="#000000" opacity="0.7" />
+      <Label id="queueTitle" translation="[60, 18]" text="Queue" font="font:SmallSystemFont" color="#FFFFFF" />
+      <Label id="queuePrev" translation="[60, 50]" text="Prev: -" font="font:SmallSystemFont" color="#B8B8C5" />
+      <Label id="queueNow" translation="[60, 75]" text="Now: -" font="font:SmallSystemFont" color="#FFFFFF" />
+      <Label id="queueNext" translation="[60, 100]" text="Next: -" font="font:SmallSystemFont" color="#B8B8C5" />
+    </Group>
+
+    <Group id="playerStatus" visible="false">
+      <Rectangle id="playerStatusBg" width="1280" height="80" color="#000000" opacity="0.7" />
+      <Label id="playerStatusLabel" translation="[60, 25]" text="" font="font:SmallSystemFont" color="#FFFFFF" />
+    </Group>
+
+    <Timer id="titleTimer" repeat="false" duration="5" />
+    <Timer id="nowPlayingTimer" repeat="false" duration="5" />
+    <Timer id="actionTimer" repeat="false" duration="5" />
+  </children>
+</component>

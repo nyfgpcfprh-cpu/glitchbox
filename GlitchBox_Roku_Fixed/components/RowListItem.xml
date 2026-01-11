@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="RowListItem" extends="Group">
+  <interface>
+    <field id="itemContent" type="node" />
+  </interface>
+
+  <children>
+    <!-- Fallback background so empty posters still show a tile -->
+    <Rectangle
+      id="posterBg"
+      width="240"
+      height="135"
+      color="#1C1C22" />
+
+    <!-- Poster image -->
+    <Poster
+      id="poster"
+      width="240"
+      height="135"
+      loadWidth="240"
+      loadHeight="135"
+      loadDisplayMode="scaleToFill" />
+
+    <!-- Title strip -->
+    <Rectangle
+      id="titleBg"
+      translation="[0, 100]"
+      width="240"
+      height="35"
+      color="#000000"
+      opacity="0.7" />
+
+    <Label
+      id="title"
+      translation="[8, 104]"
+      width="224"
+      height="28"
+      text=""
+      color="#FFFFFF"
+      font="font:SmallSystemFont"
+      horizAlign="left"
+      vertAlign="center"
+      numLines="1"
+      visible="true" />
+
+    <Label
+      id="resumeLabel"
+      translation="[8, 120]"
+      width="224"
+      height="14"
+      text=""
+      color="#B8B8C5"
+      font="font:SmallSystemFont"
+      horizAlign="left"
+      vertAlign="center"
+      numLines="1"
+      visible="true" />
+
+    <Group id="cwBadge" translation="[10, 10]" visible="false">
+      <Rectangle id="cwBadgeBg" width="88" height="22" color="#1E4D2B" opacity="0.9" />
+      <Label id="cwBadgeLabel" translation="[8, 3]" text="Continue" font="font:SmallSystemFont" color="#E5FFE8" />
+    </Group>
+
+    <!-- Focus indicator bar -->
+    <Rectangle
+      id="focusIndicator"
+      width="240"
+      height="5"
+      translation="[0, 130]"
+      color="#FFFFFF"
+      opacity="0.0" />
+  </children>
+
+  <script type="text/brightscript">
+    <![CDATA[
+    sub init()
+      m.title = m.top.findNode("title")
+      m.poster = m.top.findNode("poster")
+      m.focusIndicator = m.top.findNode("focusIndicator")
+      m.resumeLabel = m.top.findNode("resumeLabel")
+      m.cwBadge = m.top.findNode("cwBadge")
+      m.cwBadgeLabel = m.top.findNode("cwBadgeLabel")
+      m.resumeText = ""
+
+      ' RowListItem components can receive focusPercent updates from RowList
+      m.top.observeField("focusPercent", "onFocusPercentChanged")
+
+      m.top.observeField("itemContent", "onContentSet")
+      onContentSet()
+    end sub
+
+    sub onFocusPercentChanged()
+      ' focusPercent is 0..1, fade in focus indicator as a subtle highlight
+      fp = m.top.focusPercent
+      if fp = invalid then fp = 0
+      m.focusIndicator.opacity = fp
+      if m.resumeLabel <> invalid then
+        m.resumeLabel.visible = (m.resumeText <> "" and fp > 0)
+      end if
+    end sub
+
+    sub onContentSet()
+      content = m.top.itemContent
+      poster = ""
+      resumeText = ""
+      if content <> invalid then
+        if content.title <> invalid then
+          m.title.text = content.title
+        else
+          m.title.text = "Unknown"
+        end if
+
+        if content.resumePosition <> invalid then
+          resumeText = "Resume at " + formatTime(content.resumePosition)
+        end if
+
+        if content.HDPosterUrl <> invalid and content.HDPosterUrl <> "" then
+          poster = content.HDPosterUrl
+        else if content.SDPosterUrl <> invalid and content.SDPosterUrl <> "" then
+          poster = content.SDPosterUrl
+        else if content.hdPosterUrl <> invalid and content.hdPosterUrl <> "" then
+          poster = content.hdPosterUrl
+        else if content.sdPosterUrl <> invalid and content.sdPosterUrl <> "" then
+          poster = content.sdPosterUrl
+        end if
+      else
+        m.title.text = "Unknown"
+      end if
+
+      if poster = "" then poster = "pkg:/images/icon_side_hd.png"
+      m.poster.uri = poster
+      if m.resumeLabel <> invalid then
+        m.resumeLabel.text = resumeText
+        m.resumeText = resumeText
+        fp = m.top.focusPercent
+        if fp = invalid then fp = 0
+        m.resumeLabel.visible = (resumeText <> "" and fp > 0)
+      end if
+
+      if m.cwBadge <> invalid then
+        showBadge = false
+        if content <> invalid and content.resumePosition <> invalid and content.resumePosition > 0 then
+          showBadge = true
+        end if
+        m.cwBadge.visible = showBadge
+      end if
+    end sub
+
+    function formatTime(seconds as Integer) as String
+      if seconds < 0 then seconds = 0
+      mins = seconds \ 60
+      hrs = mins \ 60
+      mins = mins mod 60
+      secs = seconds mod 60
+      if hrs > 0 then
+        return hrs.toStr() + ":" + pad2(mins) + ":" + pad2(secs)
+      end if
+      return mins.toStr() + ":" + pad2(secs)
+    end function
+
+    function pad2(n as Integer) as String
+      if n < 10 then return "0" + n.toStr()
+      return n.toStr()
+    end function
+    ]]>
+  </script>
+</component>
