@@ -1,17 +1,18 @@
 sub init()
     m.list = m.top.findNode("list")
     if m.list <> invalid then
-        m.list.itemComponentName = "TopActionItem"
+        ' RowList uses rowItemComponentName (not itemComponentName)
+        m.list.rowItemComponentName = "TopActionItem"
         m.list.observeField("rowItemSelected", "onRowItemSelected")
     end if
 
     m.top.observeField("actions", "onActionsChanged")
-    m.top.observeField("hasFocus", "onFocusChanged")
     onActionsChanged()
 end sub
 
 sub onActionsChanged()
     actions = m.top.actions
+
     contentRoot = CreateObject("roSGNode", "ContentNode")
     row = contentRoot.createChild("ContentNode")
 
@@ -33,15 +34,10 @@ sub onRowItemSelected(event as Object)
     m.top.actionSelected = selection[1]
 end sub
 
-sub onFocusChanged()
-    if m.list <> invalid and m.top.hasFocus() then
-        m.list.setFocus(true)
-    end if
-end sub
-
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if press = false then return false
 
+    ' LEFT from the top row should return to the left rail
     if key = "left" then
         scene = m.top.getScene()
         if scene <> invalid then
@@ -56,6 +52,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         end if
     end if
 
+    ' DOWN from the top row should go into the main rows
     if key = "down" then
         scene = m.top.getScene()
         if scene <> invalid then

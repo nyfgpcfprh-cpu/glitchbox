@@ -9,6 +9,15 @@ sub init()
     m.loadingOverlay = m.top.findNode("loadingOverlay")
     m.topActions = m.top.findNode("topActions")
 
+    ' Global node (used for app-wide signals like Exit App)
+    ' Scene nodes expose the global node via the built-in `global` field.
+    ' Avoid using the variable name `global` (reserved / confusing in BrightScript).
+    m.globalNode = invalid
+    scene = m.top.getScene()
+    if scene <> invalid and scene.hasField("global") then
+        m.globalNode = scene.global
+    end if
+
     m.baseUrl = ""
     m.rowTypes = []
     m.mediaItems = []
@@ -24,7 +33,12 @@ sub init()
     if m.navList <> invalid then
         m.navList.observeField("itemSelected", "onNavSelected")
         m.navList.content = buildNavItems()
+
+        ' Ensure the HomeScene is the active focus root, then focus the left rail.
+        ' Without this, initial focus can appear "inactive" until Back triggers a focus reset.
+        m.top.setFocus(true)
         m.navList.setFocus(true)
+
         setNavSelectionById("home")
         m.focusTarget = "nav"
     end if
@@ -90,6 +104,7 @@ end sub
 
 sub onVisibleChanged(event as Object)
     if m.top.visible and m.navList <> invalid then
+        m.top.setFocus(true)
         setNavSelectionById("home")
 
         ' Always ensure something has focus when the scene becomes visible.
@@ -150,6 +165,7 @@ function buildNavItems() as Object
     addNavItem(content, "movies", "Movies")
     addNavItem(content, "search", "Search")
     addNavItem(content, "settings", "Settings")
+    addNavItem(content, "exit", "Exit App")
 
     return content
 end function
@@ -166,6 +182,14 @@ sub onNavSelected(event as Object)
 
     item = m.navList.content.getChild(idx)
     if item = invalid then return
+
+    ' Exit app is an explicit user action from the left rail
+    if item.id = "exit" then
+        if m.globalNode <> invalid then
+            m.globalNode.exitApp = true
+        end if
+        return
+    end if
 
     if item.id = "settings" then
         if m.top.hasField("openSettings") then m.top.openSettings = true
@@ -1279,6 +1303,33 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
         if m.navList <> invalid then
             m.navList.setFocus(true)
             m.focusTarget = "nav"
+            return true
+        end if
+    end if
+
+    ' From Top Actions, RIGHT should move into the main rows
+    if key = "right" and m.topActions <> invalid and m.topActions.hasFocus() then
+        if m.rows <> invalid then
+            m.rows.setFocus(true)
+            m.focusTarget = "rows"
+            return true
+        end if
+    end if
+
+    ' From Top Actions, DOWN should move into the main rows
+    if key = "down" and m.topActions <> invalid and m.topActions.hasFocus() then
+        if m.rows <> invalid then
+            m.rows.setFocus(true)
+            m.focusTarget = "rows"
+            return true
+        end if
+    end if
+
+    ' From rows, UP should return to Top Actions (if present), otherwise stay in rows
+    if key = "up" and m.rows <> invalid and m.rows.hasFocus() then
+        if m.topActions <> invalid then
+            m.topActions.setFocus(true)
+            m.focusTarget = "top"
             return true
         end if
     end if

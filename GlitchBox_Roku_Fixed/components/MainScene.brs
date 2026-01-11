@@ -22,7 +22,7 @@ sub init()
     if m.player <> invalid then m.player.observeField("backRequested", "onPlayerBack")
     if m.details <> invalid then m.details.observeField("backRequested", "onDetailsBack")
 
-    m.top.setFocus(true)
+    ' m.top.setFocus(true)  ' removed to avoid MainScene stealing focus
     showHome()
 end sub
 
@@ -35,9 +35,12 @@ sub showHome()
     if m.search <> invalid then m.search.visible = false
 
     ' Give focus to the Home scene, then to a focusable child (nav list / rows)
-    if m.home <> invalid then m.home.setFocus(true)
+    if m.home <> invalid then
+        ' Give focus to HomeScene container first so its children can receive focus
+        m.home.setFocus(true)
+    end if
     focusHomeDefault()
-    m.top.setFocus(true)
+    ' m.top.setFocus(true)  ' removed to avoid MainScene stealing focus
 end sub
 
 sub onHomeSelectedItem(event as Object)
