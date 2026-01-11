@@ -34,12 +34,13 @@ sub init()
         m.navList.observeField("itemSelected", "onNavSelected")
         m.navList.content = buildNavItems()
 
-        ' Ensure the HomeScene is the active focus root, then focus the left rail.
-        ' Without this, initial focus can appear "inactive" until Back triggers a focus reset.
+        ' Set the default selection first, then focus the rail.
+        setNavSelectionById("home")
+
+        ' Ensure HomeScene is the focus root before focusing children.
         m.top.setFocus(true)
         m.navList.setFocus(true)
 
-        setNavSelectionById("home")
         m.focusTarget = "nav"
     end if
 
@@ -53,6 +54,8 @@ sub init()
     end if
 
     if m.topActions <> invalid then
+        ' Ensure the top actions row is visible on Home
+        m.topActions.visible = true
         m.topActions.actions = ["Resume Last", "Shuffle TV", "Shuffle Movies", "Shuffle Everything"]
         m.topActions.observeField("actionSelected", "onTopActionSelected")
     end if
