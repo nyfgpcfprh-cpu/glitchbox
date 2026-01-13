@@ -1,14 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<component name="TopActionItem" extends="Group">
+<component name="TopActionItem" extends="Group" width="204" height="84">
   <interface>
+    <!-- RowList item renderer receives ContentNode via itemContent -->
     <field id="itemContent" type="node" />
+    <field id="itemHasFocus" type="bool" />
   </interface>
 
-  <children>
-    <Rectangle id="focusFrame" width="204" height="84" translation="[-2, -2]" color="#FFD54A" opacity="0.0" />
-    <Rectangle id="bg" width="200" height="80" color="#1C1C22" />
-    <Label id="label" translation="[16, 24]" text="" font="font:SmallSystemFont" color="#FFFFFF" />
-  </children>
-
   <script type="text/brightscript" uri="pkg:/components/TopActionItem.brs" />
+
+  <children>
+    <!-- Background -->
+    <Rectangle id="bg" width="200" height="80" color="#222222" />
+
+    <!-- Focus frame (toggled by TopActionItem.brs) -->
+    <Rectangle id="focusFrame" width="204" height="84" color="#FFDD00" opacity="0.0" />
+
+    <!-- Label (text set in TopActionItem.brs for maximum compatibility) -->
+    <Label id="label" translation="[16, 24]" text="" font="font:SmallSystemFont" color="#FFFFFF" />
+
+    <!-- Focus underline -->
+    <Rectangle id="focusBar" translation="[0, 76]" width="200" height="4" color="#FFDD00" opacity="0.0" />
+  </children>
 </component>

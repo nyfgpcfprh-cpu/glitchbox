@@ -15,18 +15,118 @@ sub init()
         if m.home.hasField("openSearchRequested") then m.home.observeField("openSearchRequested", "onOpenSearch")
 
         if m.home.hasField("selectedItem") then m.home.observeField("selectedItem", "onHomeSelectedItem")
+        if m.home.hasField("playNow") then m.home.observeField("playNow", "onPlayNow")
+        if m.home.hasField("openLibrary") then m.home.observeField("openLibrary", "onOpenLibrary")
     end if
 
     if m.settings <> invalid then m.settings.observeField("backRequested", "onSettingsBack")
     if m.search <> invalid then m.search.observeField("backRequested", "onSearchBack")
     if m.player <> invalid then m.player.observeField("backRequested", "onPlayerBack")
-    if m.details <> invalid then m.details.observeField("backRequested", "onDetailsBack")
+    if m.details <> invalid then
+        m.details.observeField("backRequested", "onDetailsBack")
+        if m.details.hasField("playRequested") then m.details.observeField("playRequested", "onPlayRequested")
+    end if
+    if m.library <> invalid then
+        m.library.observeField("backRequested", "onLibraryBack")
+        if m.library.hasField("selectedItem") then m.library.observeField("selectedItem", "onLibrarySelectedItem")
+        if m.library.hasField("playNow") then m.library.observeField("playNow", "onPlayNow")
+    end if
 
     ' m.top.setFocus(true)  ' removed to avoid MainScene stealing focus
     showHome()
 end sub
 
+sub onPlayNow(event as Object)
+    if event = invalid then return
+    item = event.getData()
+    if item = invalid then return
+    showPlayer(item)
+end sub
+
+sub onPlayRequested(event as Object)
+    if event = invalid then return
+    item = event.getData()
+    if item = invalid then return
+    showPlayer(item)
+end sub
+
+sub onOpenLibrary(event as Object)
+    if event <> invalid and event.getData() <> true then return
+
+    if m.home <> invalid and m.home.hasField("openLibrary") then m.home.openLibrary = false
+
+    if m.home <> invalid then m.home.visible = false
+    if m.details <> invalid then m.details.visible = false
+    if m.player <> invalid then m.player.visible = false
+    if m.settings <> invalid then m.settings.visible = false
+    if m.search <> invalid then m.search.visible = false
+
+    if m.library <> invalid then
+        m.library.visible = true
+        m.library.setFocus(true)
+
+        libId = ""
+        if m.home <> invalid and m.home.hasField("selectedLibraryId") then
+            libId = m.home.selectedLibraryId
+        end if
+        if m.library.hasField("libraryId") then m.library.libraryId = libId
+
+        if m.library.hasField("serverHost") and m.home <> invalid and m.home.hasField("serverHost") then
+            m.library.serverHost = m.home.serverHost
+        end if
+
+        if m.library.hasField("libraryName") then
+            m.library.libraryName = getLibraryNameById(libId)
+        end if
+        if m.library.hasField("libraryKind") then
+            m.library.libraryKind = getLibraryKindById(libId)
+        end if
+    end if
+end sub
+
+sub onLibraryBack(event as Object)
+    if event <> invalid and event.getData() <> true then return
+
+    if m.library <> invalid then
+        m.library.backRequested = false
+        m.library.visible = false
+    end if
+    showHome()
+end sub
+
+sub onLibrarySelectedItem(event as Object)
+    onHomeSelectedItem(event)
+end sub
+
+function getLibraryNameById(id as String) as String
+    if m.home = invalid or m.home.hasField("libraries") = false then return ""
+    libs = m.home.libraries
+    if libs = invalid then return ""
+    for each lib in libs
+        if lib <> invalid and lib.id <> invalid and lib.id.toStr() = id then
+            if lib.name <> invalid and lib.name <> "" then return lib.name
+            exit for
+        end if
+    end for
+    return ""
+end function
+
+function getLibraryKindById(id as String) as String
+    if m.home = invalid or m.home.hasField("libraries") = false then return ""
+    libs = m.home.libraries
+    if libs = invalid then return ""
+    for each lib in libs
+        if lib <> invalid and lib.id <> invalid and lib.id.toStr() = id then
+            if lib.type <> invalid then return LCase(lib.type)
+            if lib.kind <> invalid then return LCase(lib.kind)
+            exit for
+        end if
+    end for
+    return ""
+end function
+
 sub showHome()
+    if m.top <> invalid then m.top.setFocus(true)
     if m.home <> invalid then m.home.visible = true
     if m.details <> invalid then m.details.visible = false
     if m.library <> invalid then m.library.visible = false
@@ -40,7 +140,6 @@ sub showHome()
         m.home.setFocus(true)
     end if
     focusHomeDefault()
-    ' m.top.setFocus(true)  ' removed to avoid MainScene stealing focus
 end sub
 
 sub onHomeSelectedItem(event as Object)
@@ -74,6 +173,20 @@ sub onHomeSelectedItem(event as Object)
         actions = m.details.findNode("actions")
         if actions <> invalid then actions.setFocus(true)
     end if
+end sub
+
+sub showPlayer(item as Object)
+    if m.player = invalid then return
+
+    if m.home <> invalid then m.home.visible = false
+    if m.details <> invalid then m.details.visible = false
+    if m.library <> invalid then m.library.visible = false
+    if m.settings <> invalid then m.settings.visible = false
+    if m.search <> invalid then m.search.visible = false
+
+    m.player.visible = true
+    m.player.setFocus(true)
+    if m.player.hasField("playbackItem") then m.player.playbackItem = item
 end sub
 
 sub onOpenSettings(event as Object)

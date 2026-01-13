@@ -22,6 +22,14 @@ const API_BASE = (() => {
   } catch {
     // ignore
   }
+  try {
+    const { protocol, host, hostname } = window.location;
+    if (hostname && hostname !== "127.0.0.1" && hostname !== "localhost") {
+      return `${protocol}//${host}`;
+    }
+  } catch {
+    // ignore
+  }
   return "http://127.0.0.1:8765";
 })();
 
@@ -56,103 +64,113 @@ function absolutizeArtworkUrl(url) {
 }
 
 // -----------------
-// Artwork (local poster mapping; no DB changes)
+// Artwork (server-persisted poster mapping)
 // -----------------
-// For now we attach a cached artwork URL to a specific media_file_id via localStorage.
-// This keeps posters "mandatory" in the UI (never blank) without adding schema.
+// Posters are stored in the server DB (external_artwork) and cached client-side.
 
-const POSTER_KEY_PREFIX = "glitchbox.poster.mf:";
+const ARTWORK_CACHE = new Map();
+let ARTWORK_CACHE_READY = false;
+let ARTWORK_CACHE_PROMISE = null;
 
 function posterKeyForMediaFileId(id) {
-  return `${POSTER_KEY_PREFIX}${id}`;
+  return `media_file:${id}`;
 }
-
-function getPosterUrlForMediaFileId(id) {
-  try {
-    const raw = localStorage.getItem(posterKeyForMediaFileId(id));
-    return absolutizeArtworkUrl(raw);
-  } catch {
-    return null;
-  }
-}
-
-function setPosterUrlForMediaFileId(id, url) {
-  try {
-    const u = absolutizeArtworkUrl(url);
-    const key = posterKeyForMediaFileId(id);
-    if (!u) {
-      localStorage.removeItem(key);
-      return;
-    }
-    localStorage.setItem(key, u);
-  } catch {
-    // ignore
-  }
-}
-
-// -----------------
-// TV Artwork (local poster mapping; explicit; no DB changes)
-// -----------------
-// TV posters are stored explicitly at:
-// - Show level: tv:<showSlug>
-// - Season level: tv:<showSlug>:sNN
-// Episodes never get posters directly; they use effective fallback.
-
-const TV_POSTER_KEY_PREFIX = "glitchbox.poster.tv:";
 
 function posterKeyForTvShow(showSlug) {
-  return `${TV_POSTER_KEY_PREFIX}show:${showSlug}`;
+  return `group_key:tv:${showSlug}`;
 }
 
 function posterKeyForTvSeason(showSlug, season2) {
   // season2 must be 2-digit string, e.g. "01"
-  return `${TV_POSTER_KEY_PREFIX}season:${showSlug}:s${season2}`;
+  return `group_key:tv:${showSlug}:s${season2}`;
+}
+
+async function ensureArtworkCache() {
+  if (ARTWORK_CACHE_READY) return;
+  if (ARTWORK_CACHE_PROMISE) return ARTWORK_CACHE_PROMISE;
+  ARTWORK_CACHE_PROMISE = (async () => {
+    let offset = 0;
+    const limit = 200;
+    for (;;) {
+      const res = await api.get(`/artwork?limit=${limit}&offset=${offset}`);
+      const items = Array.isArray(res?.items) ? res.items : [];
+      for (const it of items) {
+        const key = it?.internal_key;
+        if (!key) continue;
+        const url = absolutizeArtworkUrl(it?.poster_url);
+        if (url) ARTWORK_CACHE.set(key, url);
+      }
+      if (items.length < limit) break;
+      offset += limit;
+    }
+    ARTWORK_CACHE_READY = true;
+  })();
+  return ARTWORK_CACHE_PROMISE;
+}
+
+function getPosterUrlForMediaFileId(id) {
+  if (!id) return null;
+  const key = posterKeyForMediaFileId(id);
+  return ARTWORK_CACHE.get(key) || null;
 }
 
 function getPosterUrlForTvShow(showSlug) {
-  try {
-    const raw = localStorage.getItem(posterKeyForTvShow(showSlug));
-    return absolutizeArtworkUrl(raw);
-  } catch {
-    return null;
-  }
-}
-
-function setPosterUrlForTvShow(showSlug, url) {
-  try {
-    const u = absolutizeArtworkUrl(url);
-    const key = posterKeyForTvShow(showSlug);
-    if (!u) {
-      localStorage.removeItem(key);
-      return;
-    }
-    localStorage.setItem(key, u);
-  } catch {
-    // ignore
-  }
+  if (!showSlug) return null;
+  return ARTWORK_CACHE.get(posterKeyForTvShow(showSlug)) || null;
 }
 
 function getPosterUrlForTvSeason(showSlug, season2) {
-  try {
-    const raw = localStorage.getItem(posterKeyForTvSeason(showSlug, season2));
-    return absolutizeArtworkUrl(raw);
-  } catch {
-    return null;
-  }
+  if (!showSlug || !season2) return null;
+  return ARTWORK_CACHE.get(posterKeyForTvSeason(showSlug, season2)) || null;
 }
 
-function setPosterUrlForTvSeason(showSlug, season2, url) {
-  try {
-    const u = absolutizeArtworkUrl(url);
-    const key = posterKeyForTvSeason(showSlug, season2);
-    if (!u) {
-      localStorage.removeItem(key);
-      return;
-    }
-    localStorage.setItem(key, u);
-  } catch {
-    // ignore
+async function setPosterForInternalKey({ internalKey, url, provider, providerId }) {
+  const posterUrl = absolutizeArtworkUrl(url);
+  if (!internalKey) return;
+
+  if (!posterUrl) {
+    await api.del(`/artwork?internal_key=${encodeURIComponent(internalKey)}`);
+    ARTWORK_CACHE.delete(internalKey);
+    return;
   }
+
+  await api.post("/artwork", {
+    internal_key: internalKey,
+    provider: provider || "manual",
+    provider_id: providerId || "manual",
+    poster_url: posterUrl,
+  });
+  ARTWORK_CACHE.set(internalKey, posterUrl);
+}
+
+async function setPosterUrlForMediaFileId(id, url, provider = "manual", providerId = "manual") {
+  if (!id) return;
+  return setPosterForInternalKey({
+    internalKey: posterKeyForMediaFileId(id),
+    url,
+    provider,
+    providerId,
+  });
+}
+
+async function setPosterUrlForTvShow(showSlug, url, provider = "manual", providerId = "manual") {
+  if (!showSlug) return;
+  return setPosterForInternalKey({
+    internalKey: posterKeyForTvShow(showSlug),
+    url,
+    provider,
+    providerId,
+  });
+}
+
+async function setPosterUrlForTvSeason(showSlug, season2, url, provider = "manual", providerId = "manual") {
+  if (!showSlug || !season2) return;
+  return setPosterForInternalKey({
+    internalKey: posterKeyForTvSeason(showSlug, season2),
+    url,
+    provider,
+    providerId,
+  });
 }
 
 function effectivePosterUrlForEpisode({ showSlug, season2, mediaFileId }) {
@@ -220,7 +238,7 @@ async function setPosterFlowForTvShow({ router, showSlug, showName }) {
     return;
   }
 
-  setPosterUrlForTvShow(showSlug, url);
+  await setPosterUrlForTvShow(showSlug, url, "tmdb", String(chosen.id));
   router.navigate(window.location.hash.replace(/^#/, "") || "/");
 }
 
@@ -276,7 +294,7 @@ async function setPosterFlowForTvSeason({ router, showSlug, showName, season2 })
     return;
   }
 
-  setPosterUrlForTvSeason(showSlug, s2, url);
+  await setPosterUrlForTvSeason(showSlug, s2, url, "tmdb", String(chosen.id));
   router.navigate(window.location.hash.replace(/^#/, "") || "/");
 }
 
@@ -367,7 +385,7 @@ function recordAutoPosterChange(kind, key, prev, next) {
   _lastAutoPosterRun.changes.push({ kind, key, prev: prev ?? null, next: next ?? null });
 }
 
-function undoLastAutoPosterRun() {
+async function undoLastAutoPosterRun() {
   if (!_lastAutoPosterRun || !_lastAutoPosterRun.changes.length) {
     alert("No auto-poster run to undo.");
     return;
@@ -378,16 +396,16 @@ function undoLastAutoPosterRun() {
     try {
       if (ch.kind === "movie") {
         // key is mediaFileId
-        setPosterUrlForMediaFileId(ch.key, ch.prev);
+        await setPosterUrlForMediaFileId(ch.key, ch.prev);
       } else if (ch.kind === "tv_show") {
         // key is showSlug
-        setPosterUrlForTvShow(ch.key, ch.prev);
+        await setPosterUrlForTvShow(ch.key, ch.prev);
       } else if (ch.kind === "tv_season") {
         // key is showSlug|season2
         const parts = String(ch.key).split("|");
         const showSlug = parts[0];
         const season2 = parts[1];
-        if (showSlug && season2) setPosterUrlForTvSeason(showSlug, season2, ch.prev);
+        if (showSlug && season2) await setPosterUrlForTvSeason(showSlug, season2, ch.prev);
       }
     } catch {
       // ignore
@@ -409,7 +427,8 @@ async function tmdbAutoPickPoster({ tmdbType, query, size }) {
   if (!chosen || !chosen.poster_path) return null;
 
   const url = await cacheTmdbPoster({ tmdbType: t, tmdbId: chosen.id, posterPath: chosen.poster_path, size: size || "w342" });
-  return url || null;
+  if (!url) return null;
+  return { url, tmdbId: String(chosen.id), tmdbType: t };
 }
 
 // -----------------
@@ -417,6 +436,7 @@ async function tmdbAutoPickPoster({ tmdbType, query, size }) {
 // -----------------
 async function autoFetchMissingMoviePostersForLibrary({ libraryId, statusEl }) {
   const id = String(libraryId);
+  await ensureArtworkCache();
   const limit = 200;
   let offset = 0;
   let total = null;
@@ -445,10 +465,10 @@ async function autoFetchMissingMoviePostersForLibrary({ libraryId, statusEl }) {
       if (statusEl) statusEl.textContent = `Auto Fetch (movies) — ${done + 1} / ${total || "?"} … ${title}`;
 
       try {
-        const url = await tmdbAutoPickPoster({ tmdbType: "movie", query: title, size: "w342" });
-        if (url) {
-          setPosterUrlForMediaFileId(mid, url);
-          recordAutoPosterChange("movie", mid, null, url);
+        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: title, size: "w342" });
+        if (picked?.url) {
+          await setPosterUrlForMediaFileId(mid, picked.url, "tmdb", picked.tmdbId);
+          recordAutoPosterChange("movie", mid, null, picked.url);
           setCount++;
         }
       } catch {
@@ -465,6 +485,7 @@ async function autoFetchMissingMoviePostersForLibrary({ libraryId, statusEl }) {
 
 async function autoFetchMissingTvPostersForLibrary({ libraryId, statusEl }) {
   const id = String(libraryId);
+  await ensureArtworkCache();
 
   // Build show->season list from groups
   const groups = await fetchAllGroups(api, id, "tv:");
@@ -495,10 +516,10 @@ async function autoFetchMissingTvPostersForLibrary({ libraryId, statusEl }) {
       if (statusEl) statusEl.textContent = `Auto Fetch (tv) — show ${idx}/${shows.length} … ${showName}`;
       try {
         const prev = getPosterUrlForTvShow(show);
-        const url = await tmdbAutoPickPoster({ tmdbType: "tv", query: showName || show, size: "w342" });
-        if (url) {
-          setPosterUrlForTvShow(show, url);
-          recordAutoPosterChange("tv_show", show, prev, url);
+        const picked = await tmdbAutoPickPoster({ tmdbType: "tv", query: showName || show, size: "w342" });
+        if (picked?.url) {
+          await setPosterUrlForTvShow(show, picked.url, "tmdb", picked.tmdbId);
+          recordAutoPosterChange("tv_show", show, prev, picked.url);
         }
       } catch {
         // continue
@@ -518,10 +539,10 @@ async function autoFetchMissingTvPostersForLibrary({ libraryId, statusEl }) {
 
       try {
         const prev = getPosterUrlForTvSeason(show, s2);
-        const url = await tmdbAutoPickPoster({ tmdbType: "tv", query: q, size: "w342" });
-        if (url) {
-          setPosterUrlForTvSeason(show, s2, url);
-          recordAutoPosterChange("tv_season", `${show}|${s2}`, prev, url);
+        const picked = await tmdbAutoPickPoster({ tmdbType: "tv", query: q, size: "w342" });
+        if (picked?.url) {
+          await setPosterUrlForTvSeason(show, s2, picked.url, "tmdb", picked.tmdbId);
+          recordAutoPosterChange("tv_season", `${show}|${s2}`, prev, picked.url);
         }
       } catch {
         // continue
@@ -611,7 +632,7 @@ async function setPosterFlowForRow({ router, row, tmdbType }) {
     return;
   }
 
-  setPosterUrlForMediaFileId(row.id, url);
+  await setPosterUrlForMediaFileId(row.id, url, "tmdb", String(chosen.id));
 
   // Re-render current route so the poster cell updates.
   router.navigate(window.location.hash.replace(/^#/, "") || "/");
@@ -658,6 +679,7 @@ function renderTopNav(router) {
     ["Libraries", "/libraries"],
     ["Continue Watching", "/continue"],
     ["Playlists", "/playlists"],
+    ["Settings", "/settings"],
   ];
 
   for (const [label, path] of links) {
@@ -934,6 +956,7 @@ function DashboardPage() {
 
   (async () => {
     try {
+      await ensureArtworkCache();
       const res = await api.get(`/users/1/continue-watching?limit=10&offset=0`);
       const items = res?.items ?? [];
       cwStatus.textContent = `Loaded ${items.length} items.`;
@@ -987,6 +1010,82 @@ function DashboardPage() {
     } catch (e) {
       cwStatus.textContent = `ERROR: ${e?.message || String(e)}`;
       cwTbody.innerHTML = "";
+    }
+  })();
+
+  return wrap;
+}
+
+function SettingsPage() {
+  const wrap = h("div");
+  wrap.appendChild(renderPageTitle("Settings", "API keys are stored on the server."));
+
+  const box = h("div", {
+    style: {
+      padding: "12px",
+      border: "1px solid #ddd",
+      borderRadius: "6px",
+      maxWidth: "640px",
+    },
+  });
+
+  const status = h("div", { style: { marginBottom: "10px", color: "#666" } }, ["Loading…"]);
+  box.appendChild(status);
+
+  const tmdbRow = h("div", { style: { marginBottom: "10px" } });
+  tmdbRow.appendChild(h("div", { style: { fontWeight: "600", marginBottom: "4px" } }, ["TMDB API Key"]));
+  const tmdbInput = h("input", { type: "password", style: "width: 100%; padding: 6px;" });
+  tmdbRow.appendChild(tmdbInput);
+  box.appendChild(tmdbRow);
+
+  const osRow = h("div", { style: { marginBottom: "10px" } });
+  osRow.appendChild(h("div", { style: { fontWeight: "600", marginBottom: "4px" } }, ["OpenSubtitles API Key"]));
+  const osInput = h("input", { type: "password", style: "width: 100%; padding: 6px;" });
+  osRow.appendChild(osInput);
+  box.appendChild(osRow);
+
+  const showRow = h("div", { style: { marginBottom: "10px" } });
+  const showToggle = h("input", { type: "checkbox", id: "show-keys" });
+  const showLabel = h("label", { for: "show-keys", style: { marginLeft: "6px" } }, ["Show keys"]);
+  showToggle.addEventListener("change", () => {
+    const t = showToggle.checked ? "text" : "password";
+    tmdbInput.type = t;
+    osInput.type = t;
+  });
+  showRow.appendChild(showToggle);
+  showRow.appendChild(showLabel);
+  box.appendChild(showRow);
+
+  const saveBtn = h("button", {}, ["Save Settings"]);
+  saveBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    saveBtn.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      await api.post("/settings", {
+        tmdb_api_key: String(tmdbInput.value || "").trim(),
+        opensubtitles_api_key: String(osInput.value || "").trim(),
+      });
+      status.textContent = "Saved.";
+    } catch (err) {
+      status.textContent = `ERROR: ${err?.message || String(err)}`;
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+  box.appendChild(saveBtn);
+
+  wrap.appendChild(box);
+
+  (async () => {
+    try {
+      const res = await api.get("/settings");
+      const s = res?.settings || {};
+      tmdbInput.value = s.tmdb_api_key || "";
+      osInput.value = s.opensubtitles_api_key || "";
+      status.textContent = "Loaded.";
+    } catch (err) {
+      status.textContent = `ERROR: ${err?.message || String(err)}`;
     }
   })();
 
@@ -1081,10 +1180,10 @@ function PostersPage({ router, query }) {
   const libUndoBtn = h("button", {}, ["Undo Last Auto Fetch"]);
   const libAutoStatus = h("div", { style: { color: "#666" } }, [""]);
 
-  libUndoBtn.addEventListener("click", (e) => {
+  libUndoBtn.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    undoLastAutoPosterRun();
+    await undoLastAutoPosterRun();
     // re-render this Posters route so indicators update
     router.navigate(window.location.hash.replace(/^#/, "") || "/");
   });
@@ -1321,10 +1420,10 @@ function PostersPage({ router, query }) {
       const mediaId = String(it.mediaId);
       const prev = getPosterUrlForMediaFileId(mediaId);
       try {
-        const url = await tmdbAutoPickPoster({ tmdbType: "movie", query: it.title, size: "w342" });
-        if (url) {
-          setPosterUrlForMediaFileId(mediaId, url);
-          recordAutoPosterChange("movie", mediaId, prev, url);
+        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: it.title, size: "w342" });
+        if (picked?.url) {
+          await setPosterUrlForMediaFileId(mediaId, picked.url, "tmdb", picked.tmdbId);
+          recordAutoPosterChange("movie", mediaId, prev, picked.url);
         }
       } catch {
         // keep going
@@ -1366,10 +1465,10 @@ function PostersPage({ router, query }) {
       const prev = getPosterUrlForMediaFileId(mediaId);
       if (prev) continue; // only fill missing
       try {
-        const url = await tmdbAutoPickPoster({ tmdbType: "movie", query: it.title, size: "w342" });
-        if (url) {
-          setPosterUrlForMediaFileId(mediaId, url);
-          recordAutoPosterChange("movie", mediaId, prev, url);
+        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: it.title, size: "w342" });
+        if (picked?.url) {
+          await setPosterUrlForMediaFileId(mediaId, picked.url, "tmdb", picked.tmdbId);
+          recordAutoPosterChange("movie", mediaId, prev, picked.url);
         }
       } catch {
         // keep going
@@ -1384,10 +1483,10 @@ function PostersPage({ router, query }) {
   });
 
   const undoAutoBtn = h("button", {}, ["Undo Last Auto Fetch"]);
-  undoAutoBtn.addEventListener("click", (e) => {
+  undoAutoBtn.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    undoLastAutoPosterRun();
+    await undoLastAutoPosterRun();
     load();
   });
 
@@ -1459,10 +1558,10 @@ function PostersPage({ router, query }) {
     const actions = h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } });
 
     const searchSet = h("button", {}, ["Search & Set Poster"]);
-    searchSet.addEventListener("click", (e) => {
+    searchSet.addEventListener("click", async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      setPosterFlowForRow({ router, row: { id: cur.mediaId, title: cur.title }, tmdbType: "movie" });
+      await setPosterFlowForRow({ router, row: { id: cur.mediaId, title: cur.title }, tmdbType: "movie" });
       // Refresh the table and queue view after setting.
       load();
       renderQueue();
@@ -1470,10 +1569,10 @@ function PostersPage({ router, query }) {
 
     const clear = h("button", {}, ["Clear Poster"]);
     clear.disabled = !getPosterUrlForMediaFileId(cur.mediaId);
-    clear.addEventListener("click", (e) => {
+    clear.addEventListener("click", async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      setPosterUrlForMediaFileId(cur.mediaId, null);
+      await setPosterUrlForMediaFileId(cur.mediaId, null);
       // Re-render queue (keeps index)
       renderQueue();
       // Also refresh table view
@@ -1528,6 +1627,7 @@ function PostersPage({ router, query }) {
   async function load() {
     status.textContent = "Loading…";
     tbody.innerHTML = "";
+    await ensureArtworkCache();
 
     const params = new URLSearchParams();
     params.set("limit", String(limit));
@@ -1623,19 +1723,19 @@ function PostersPage({ router, query }) {
 
         const setPosterBtn = h("button", {}, ["Set Poster"]);
         setPosterBtn.disabled = !mediaId;
-        setPosterBtn.addEventListener("click", (e) => {
+        setPosterBtn.addEventListener("click", async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          setPosterFlowForRow({ router, row: { id: mediaId, title }, tmdbType: "movie" });
+          await setPosterFlowForRow({ router, row: { id: mediaId, title }, tmdbType: "movie" });
         });
 
         const clearPosterBtn = h("button", { style: { marginLeft: "6px" } }, ["Clear Poster"]);
         clearPosterBtn.disabled = !mediaId || !getPosterUrlForMediaFileId(mediaId);
-        clearPosterBtn.addEventListener("click", (e) => {
+        clearPosterBtn.addEventListener("click", async (e) => {
           e.preventDefault();
           e.stopPropagation();
           if (!mediaId) return;
-          setPosterUrlForMediaFileId(mediaId, null);
+          await setPosterUrlForMediaFileId(mediaId, null);
           load();
         });
 
@@ -1740,10 +1840,10 @@ function LibrariesPage({ router }) {
     for (const cb of tbody.querySelectorAll("input[data-lib-sel]") ) cb.checked = false;
   });
 
-  undoAutoBtn.addEventListener("click", (e) => {
+  undoAutoBtn.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    undoLastAutoPosterRun();
+    await undoLastAutoPosterRun();
   });
 
   autoSelectedBtn.addEventListener("click", async (e) => {
@@ -1864,10 +1964,7 @@ function LibrariesPage({ router }) {
         tr.appendChild(h("td", {}, [detectedType]));
         tr.appendChild(h("td", {}, [lib.media_count ?? 0]));
         const openBtn = h("button", {}, ["Open"]);
-        openBtn.addEventListener("click", () => router.navigate(`/libraries/${lib.id}`));
-
-        const browseBtn = h("button", { style: { marginLeft: "6px" } }, ["Browse"]);
-        browseBtn.addEventListener("click", () => router.navigate(`/libraries/${lib.id}/browse`));
+        openBtn.addEventListener("click", () => router.navigate(`/libraries/${lib.id}/browse`));
 
         const postersBtn = h("button", { style: { marginLeft: "6px" } }, ["Posters"]);
         postersBtn.addEventListener("click", () => router.navigate(`/posters?libraryId=${encodeURIComponent(String(lib.id))}`));
@@ -1959,15 +2056,14 @@ function LibrariesPage({ router }) {
         });
 
         const undoBtn = h("button", { style: { marginLeft: "6px" } }, ["Undo Last Auto Fetch"]);
-        undoBtn.addEventListener("click", (e) => {
+        undoBtn.addEventListener("click", async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          undoLastAutoPosterRun();
+          await undoLastAutoPosterRun();
         });
 
         const tdActions = h("td");
         tdActions.appendChild(openBtn);
-        tdActions.appendChild(browseBtn);
         tdActions.appendChild(postersBtn);
         tdActions.appendChild(scanBtn);
         tdActions.appendChild(autoBtn);
@@ -1985,8 +2081,9 @@ function LibrariesPage({ router }) {
   return wrap;
 }
 
-function LibraryBrowsePage({ router, libraryId }) {
+function LibraryBrowsePage({ router, libraryId, query }) {
   const id = String(libraryId);
+  const groupKey = query && query.group_key ? String(query.group_key) : "";
 
   const wrap = h("div");
 
@@ -2077,10 +2174,10 @@ function LibraryBrowsePage({ router, libraryId }) {
   const undoAutoBtn = h("button", {}, ["Undo Last Auto Fetch"]);
   const postersAutoStatus = h("div", { style: { color: "#666" } }, [""]);
 
-  undoAutoBtn.addEventListener("click", (e) => {
+  undoAutoBtn.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    undoLastAutoPosterRun();
+    await undoLastAutoPosterRun();
     router.navigate(window.location.hash.replace(/^#/, "") || "/");
   });
 
@@ -2194,12 +2291,14 @@ function LibraryBrowsePage({ router, libraryId }) {
     async function load() {
       status.textContent = "Loading…";
       tbody.innerHTML = "";
+      await ensureArtworkCache();
 
       const params = new URLSearchParams();
       params.set("limit", String(limit));
       params.set("offset", String(offset));
       params.set("order", order);
       if (q && q.trim()) params.set("q", q.trim());
+      if (groupKey) params.set("group_key", groupKey);
 
       try {
         const cwMap = await ensureContinueWatchingMap(api, 1);
@@ -2230,7 +2329,7 @@ function LibraryBrowsePage({ router, libraryId }) {
 
           tr.appendChild(h("td", {}, [mediaId]));
 
-          // Poster (always shows something; mapping is localStorage for now)
+          // Poster (always shows something; mapping is server-persisted)
           const posterUrl = getPosterUrlForMediaFileId(mediaId);
           const posterTd = h("td");
           const isTv = libType === "tv";
@@ -2280,19 +2379,19 @@ function LibraryBrowsePage({ router, libraryId }) {
           } else {
             const setPosterBtn = h("button", { style: { marginLeft: "6px" } }, ["Set Poster"]);
             setPosterBtn.disabled = !mediaId;
-            setPosterBtn.addEventListener("click", (e) => {
+            setPosterBtn.addEventListener("click", async (e) => {
               e.preventDefault();
               e.stopPropagation();
-              setPosterFlowForRow({ router, row: { id: mediaId, title }, tmdbType: libType });
+              await setPosterFlowForRow({ router, row: { id: mediaId, title }, tmdbType: libType });
             });
 
             const clearPosterBtn = h("button", { style: { marginLeft: "6px" } }, ["Clear Poster"]);
             clearPosterBtn.disabled = !mediaId || !getPosterUrlForMediaFileId(mediaId);
-            clearPosterBtn.addEventListener("click", (e) => {
+            clearPosterBtn.addEventListener("click", async (e) => {
               e.preventDefault();
               e.stopPropagation();
               if (!mediaId) return;
-              setPosterUrlForMediaFileId(mediaId, null);
+              await setPosterUrlForMediaFileId(mediaId, null);
               router.navigate(window.location.hash.replace(/^#/, "") || "/");
             });
 
@@ -2341,6 +2440,11 @@ function LibraryBrowsePage({ router, libraryId }) {
     return flat;
   }
 
+  if (groupKey) {
+    wrap.appendChild(renderFlatBrowse());
+    return wrap;
+  }
+
   const tvBox = h("div");
   wrap.appendChild(tvBox);
 
@@ -2348,6 +2452,7 @@ function LibraryBrowsePage({ router, libraryId }) {
     // Try TV hierarchy first by asking for tv: group keys.
     // If none exist, fall back to flat listing.
     try {
+      await ensureArtworkCache();
       const groups = await fetchAllGroups(api, id, "tv:");
       if (!Array.isArray(groups) || groups.length === 0) {
         tvBox.appendChild(renderFlatBrowse());
@@ -2409,7 +2514,49 @@ function LibraryBrowsePage({ router, libraryId }) {
         tr.appendChild(h("td", {}, [String(s.totalEpisodes)]));
 
         const actions = h("td");
-        // Add any actions for the show here if needed.
+        const setShowBtn = h("button", {}, ["Set Show Poster"]);
+        setShowBtn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          await setPosterFlowForTvShow({ router, showSlug: s.show, showName });
+        });
+        actions.appendChild(setShowBtn);
+
+        if (s.seasons.length > 0) {
+          const seasonSelect = h("select", { style: { marginLeft: "6px" } });
+          for (const sn of s.seasons) {
+            const s2 = String(sn.season).padStart(2, "0");
+            const opt = h("option", { value: sn.group_key, "data-season2": s2 }, [`Season ${s2}`]);
+            seasonSelect.appendChild(opt);
+          }
+          actions.appendChild(seasonSelect);
+
+          const openBtn = h("button", { style: { marginLeft: "6px" } }, ["Open"]);
+          openBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const gk = seasonSelect.value;
+            if (!gk) return;
+            router.navigate(`/libraries/${encodeURIComponent(id)}/browse?group_key=${encodeURIComponent(gk)}`);
+          });
+          actions.appendChild(openBtn);
+
+          const setSeasonBtn = h("button", { style: { marginLeft: "6px" } }, ["Set Season Poster"]);
+          setSeasonBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const opt = seasonSelect.options[seasonSelect.selectedIndex];
+            const s2 = opt ? opt.getAttribute("data-season2") : "";
+            if (!s2) return;
+            await setPosterFlowForTvSeason({
+              router,
+              showSlug: s.show,
+              showName,
+              season2: s2,
+            });
+          });
+          actions.appendChild(setSeasonBtn);
+        }
         tr.appendChild(actions);
         tbody.appendChild(tr);
       }
@@ -2454,10 +2601,11 @@ function LibraryDetailPage({ router, id }) {
 // -----------------
 
 // const router = createRouter();
-const routes = [
-  { path: "/", view: () => DashboardPage() },
+  const routes = [
+    { path: "/", view: () => DashboardPage() },
 
-  { path: "/libraries", view: () => LibrariesPage({ router }) },
+    { path: "/libraries", view: () => LibrariesPage({ router }) },
+    { path: "/settings", view: () => SettingsPage() },
 
   { path: "/posters", view: (ctx = {}) =>
       PostersPage({ router, query: ctx.query || {} })
@@ -2469,6 +2617,7 @@ const routes = [
       LibraryBrowsePage({
         router,
         libraryId: ctx && ctx.params && ctx.params.id ? ctx.params.id : "",
+        query: ctx.query || {},
       }),
   },
 ];

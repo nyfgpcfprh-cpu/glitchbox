@@ -3,7 +3,7 @@
   <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
 
   <children>
-    <HomeScene id="homeScene" visible="true" />
+    <HomeScene id="homeScene" visible="true" focusable="true" />
     <DetailsScene id="detailsScene" visible="false" />
     <LibraryScene id="libraryScene" visible="false" />
     <PlayerScene id="playerScene" visible="false" />

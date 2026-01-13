@@ -29,6 +29,7 @@ from python.db import (
     get_playlist_items,
     get_playlists_for_user,
     get_recently_added,
+    get_setting,
     list_library_media_files,
     list_library_groups,
     get_user_id,
@@ -37,6 +38,7 @@ from python.db import (
     move_playlist_item,
     remove_item_from_playlist,
     rename_playlist,
+    set_setting,
     set_user_password,
     list_libraries,
     create_library,
@@ -44,6 +46,11 @@ from python.db import (
     add_library_root,
     list_library_roots,
     remove_library_root,
+    attach_artwork,
+    detach_artwork,
+    get_artwork_for_internal_key,
+    list_external_artwork,
+    list_settings,
 )
 
 # --- WebUI/scan support
@@ -255,6 +262,67 @@ class MediaServerService:
             items, total = get_continue_watching_groups(conn, user_id=user_id, page=page)
         return ServiceResult(items=items, total=total, limit=limit, offset=offset)
 
+    # -----------------
+    # App Settings (simple key/value)
+    # -----------------
+
+    def get_setting(self, key: str) -> str | None:
+        self._init_db()
+        with self.db.tx() as conn:
+            return get_setting(conn, key=key)
+
+    def list_settings(self, keys: List[str] | None = None) -> List[Dict[str, Any]]:
+        self._init_db()
+        with self.db.tx() as conn:
+            return list_settings(conn, keys=keys)
+
+    def set_settings(self, settings: Dict[str, Any]) -> None:
+        self._init_db()
+        with self.db.tx() as conn:
+            for k, v in (settings or {}).items():
+                set_setting(conn, key=str(k), value=None if v is None else str(v))
+
+    # -----------------
+    # Artwork (explicit, optional)
+    # -----------------
+
+    def get_artwork(self, internal_key: str) -> Dict[str, Any] | None:
+        self._init_db()
+        with self.db.tx() as conn:
+            return get_artwork_for_internal_key(conn, internal_key=internal_key)
+
+    def list_artwork(self, limit: int, offset: int) -> ServiceResult:
+        self._init_db()
+        page = Page(limit=limit, offset=offset)
+        with self.db.tx() as conn:
+            items, total = list_external_artwork(conn, page=page)
+        return ServiceResult(items=items, total=total, limit=limit, offset=offset)
+
+    def attach_artwork(
+        self,
+        *,
+        internal_key: str,
+        provider: str,
+        provider_id: str,
+        poster_url: str | None,
+        confidence: str = "manual",
+    ) -> None:
+        self._init_db()
+        with self.db.tx() as conn:
+            attach_artwork(
+                conn,
+                internal_key=internal_key,
+                provider=provider,
+                provider_id=provider_id,
+                poster_url=poster_url,
+                confidence=confidence,
+            )
+
+    def detach_artwork(self, internal_key: str) -> None:
+        self._init_db()
+        with self.db.tx() as conn:
+            detach_artwork(conn, internal_key=internal_key)
+
     def set_playback_progress(
         self,
         *,
@@ -384,13 +452,13 @@ def _ssl_context() -> ssl.SSLContext:
     return ctx
 
 
-def _tmdb_api_key() -> str:
+def _tmdb_api_key_env() -> str:
     # Explicit: require env var, no guessing
     return (os.environ.get("TMDB_API_KEY") or "").strip()
 
 
-def _tmdb_get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    key = _tmdb_api_key()
+def _tmdb_get_json(path: str, params: Dict[str, Any], *, api_key: str | None = None) -> Dict[str, Any]:
+    key = (api_key or "").strip() or _tmdb_api_key_env()
     if not key:
         raise ValueError("TMDB_API_KEY is not set")
 
@@ -1070,6 +1138,31 @@ class ApiHandler(BaseHTTPRequestHandler):
                 _json_response(self, 200, {"ok": True})
                 return
 
+            # GET /settings
+            if path == "/settings":
+                keys = ["tmdb_api_key", "opensubtitles_api_key"]
+                items = self.svc.list_settings(keys=keys)
+                settings = {k: "" for k in keys}
+                for it in items:
+                    k = it.get("key")
+                    if k in settings:
+                        settings[k] = it.get("value") or ""
+                _json_response(self, 200, {"settings": settings})
+                return
+
+            # GET /artwork?internal_key=... or /artwork?limit=50&offset=0
+            if path == "/artwork":
+                internal_key = qs.get("internal_key", [None])[0]
+                if internal_key:
+                    rec = self.svc.get_artwork(str(internal_key))
+                    _json_response(self, 200, {"item": rec if rec else None})
+                else:
+                    limit = _int_qs(qs, "limit", 50)
+                    offset = _int_qs(qs, "offset", 0)
+                    res = self.svc.list_artwork(limit=limit, offset=offset)
+                    _json_response(self, 200, res.__dict__)
+                return
+
             # --- TMDB provider (explicit, admin-driven)
             # GET /providers/tmdb/search?type=movie|tv&q=...
             if path == "/providers/tmdb/search":
@@ -1082,7 +1175,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                     raise ValueError("q is required")
 
                 api_path = "/search/movie" if tmdb_type == "movie" else "/search/tv"
-                data = _tmdb_get_json(api_path, {"query": q, "include_adult": "false"})
+                tmdb_key = (self.svc.get_setting("tmdb_api_key") or "").strip()
+                data = _tmdb_get_json(api_path, {"query": q, "include_adult": "false"}, api_key=tmdb_key)
 
                 items: List[Dict[str, Any]] = []
                 for r in data.get("results", []) or []:
@@ -1117,7 +1211,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                     raise ValueError("id is required")
 
                 api_path = f"/movie/{tmdb_id}/images" if tmdb_type == "movie" else f"/tv/{tmdb_id}/images"
-                data = _tmdb_get_json(api_path, {"include_image_language": "en,null"})
+                tmdb_key = (self.svc.get_setting("tmdb_api_key") or "").strip()
+                data = _tmdb_get_json(api_path, {"include_image_language": "en,null"}, api_key=tmdb_key)
 
                 posters: List[Dict[str, Any]] = []
                 for p in data.get("posters", []) or []:
@@ -1288,6 +1383,40 @@ class ApiHandler(BaseHTTPRequestHandler):
 
                 stats = self.svc.scan(engine=engine, dry_run=dry_run, extensions=extensions)
                 _json_response(self, 200, stats)
+                return
+
+            # POST /settings {"tmdb_api_key": "...", "opensubtitles_api_key": "..."}
+            if path == "/settings":
+                body = _read_json(self) or {}
+                allowed = {}
+                if "tmdb_api_key" in body:
+                    allowed["tmdb_api_key"] = body.get("tmdb_api_key")
+                if "opensubtitles_api_key" in body:
+                    allowed["opensubtitles_api_key"] = body.get("opensubtitles_api_key")
+                if allowed:
+                    self.svc.set_settings(allowed)
+                _json_response(self, 200, {"ok": True})
+                return
+
+            # POST /artwork {"internal_key": "...", "provider": "...", "provider_id": "...", "poster_url": "..."}
+            if path == "/artwork":
+                body = _read_json(self) or {}
+                internal_key = str(body.get("internal_key", "") or "").strip()
+                provider = str(body.get("provider", "") or "").strip() or "manual"
+                provider_id = str(body.get("provider_id", "") or "").strip() or "manual"
+                poster_url = str(body.get("poster_url", "") or "").strip()
+                if not internal_key:
+                    raise ValueError("internal_key is required")
+                if not poster_url:
+                    raise ValueError("poster_url is required")
+                self.svc.attach_artwork(
+                    internal_key=internal_key,
+                    provider=provider,
+                    provider_id=provider_id,
+                    poster_url=poster_url,
+                    confidence="manual",
+                )
+                _json_response(self, 201, {"ok": True})
                 return
             # POST /artwork/cache-tmdb
             # Body: {"kind": "poster"|"backdrop", "tmdb_type": "movie"|"tv", "tmdb_id": "603", "file_path": "/abc.jpg", "size": "w342"|"original"}
@@ -1481,6 +1610,16 @@ class ApiHandler(BaseHTTPRequestHandler):
                 playlist_id = int(parts[1])
                 playlist_item_id = int(parts[3])
                 self.svc.playlist_remove_item(playlist_id, playlist_item_id)
+                _json_response(self, 200, {"ok": True})
+                return
+
+            # DELETE /artwork?internal_key=...
+            if path == "/artwork":
+                qs = parse_qs(parsed.query or "")
+                internal_key = qs.get("internal_key", [None])[0]
+                if not internal_key:
+                    raise ValueError("internal_key is required")
+                self.svc.detach_artwork(str(internal_key))
                 _json_response(self, 200, {"ok": True})
                 return
 

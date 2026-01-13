@@ -1,13 +1,10 @@
 sub init()
+    if m.top.hasField("focusable") then m.top.focusable = true
     m.navList = m.top.findNode("navList")
     m.rows = m.top.findNode("rows")
-    m.serverLabel = m.top.findNode("serverLabel")
     m.status = m.top.findNode("status")
-    m.connectionStatus = m.top.findNode("connectionStatus")
-    m.connectionActions = m.top.findNode("connectionActions")
-    m.connectionBadge = m.top.findNode("connectionBadge")
+    m.connectionBadge = invalid
     m.loadingOverlay = m.top.findNode("loadingOverlay")
-    m.topActions = m.top.findNode("topActions")
 
     ' Global node (used for app-wide signals like Exit App)
     ' Scene nodes expose the global node via the built-in `global` field.
@@ -26,13 +23,16 @@ sub init()
     m.selectedShowKey = ""
     m.selectedSeasonKey = ""
     m.tvShowKeys = []
+    m.tvShowPosters = {}
     m.tvSeasonGroups = []
     m.pendingAction = ""
     m.pendingAutoConnect = false
+    m.currentNavId = "home"
+    m.isRefreshingNav = false
 
     if m.navList <> invalid then
         m.navList.observeField("itemSelected", "onNavSelected")
-        m.navList.content = buildNavItems()
+        m.navList.content = buildNavItemsForContext(m.currentNavId)
 
         ' Set the default selection first, then focus the rail.
         setNavSelectionById("home")
@@ -48,17 +48,6 @@ sub init()
         m.rows.observeField("rowItemSelected", "onRowItemSelected")
     end if
 
-    if m.connectionActions <> invalid then
-        m.connectionActions.buttons = ["Retry"]
-        m.connectionActions.observeField("buttonSelected", "onRetrySelected")
-    end if
-
-    if m.topActions <> invalid then
-        ' Ensure the top actions row is visible on Home
-        m.topActions.visible = true
-        m.topActions.actions = ["Resume Last", "Shuffle TV", "Shuffle Movies", "Shuffle Everything"]
-        m.topActions.observeField("actionSelected", "onTopActionSelected")
-    end if
 
     if m.top.hasField("serverHost") then m.top.observeField("serverHost", "onServerHostChanged")
     if m.top.hasField("visible") then m.top.observeField("visible", "onVisibleChanged")
@@ -70,11 +59,9 @@ sub init()
     host = loadServerHost()
     if host <> "" then
         m.top.serverHost = host
-        updateServerLabel(host)
         m.baseUrl = buildBaseUrlFromHost(host)
         startAutoConnect()
     else
-        updateServerLabel("")
         setConnectionState(false, "Disconnected: set server in Settings")
     end if
 
@@ -108,7 +95,7 @@ end sub
 sub onVisibleChanged(event as Object)
     if m.top.visible and m.navList <> invalid then
         m.top.setFocus(true)
-        setNavSelectionById("home")
+        setNavSelectionById(m.currentNavId)
 
         ' Always ensure something has focus when the scene becomes visible.
         if m.focusTarget = invalid or m.focusTarget = "nav" then
@@ -116,9 +103,6 @@ sub onVisibleChanged(event as Object)
 
         else if m.focusTarget = "rows" and m.rows <> invalid then
             m.rows.setFocus(true)
-
-        else if m.focusTarget = "retry" and m.connectionActions <> invalid and m.connectionActions.visible = true then
-            m.connectionActions.setFocus(true)
 
         else
             m.navList.setFocus(true)
@@ -132,13 +116,11 @@ sub onServerHostChanged(event as Object)
     host = normalizeHostInput(host)
 
     if host = "" then
-        updateServerLabel("")
         setConnectionState(false, "Disconnected: set server in Settings")
         return
     end if
 
     m.top.serverHost = host
-    updateServerLabel(host)
     m.baseUrl = buildBaseUrlFromHost(host)
     startAutoConnect()
 end sub
@@ -151,16 +133,7 @@ function loadServerHost() as String
     return ""
 end function
 
-sub updateServerLabel(host as String)
-    if m.serverLabel = invalid then return
-    if host = "" then
-        m.serverLabel.text = "Server: not set (open Settings)"
-    else
-        m.serverLabel.text = "Server: " + host + " (Settings to change)"
-    end if
-end sub
-
-function buildNavItems() as Object
+function buildNavItemsForContext(contextId as String) as Object
     content = CreateObject("roSGNode", "ContentNode")
 
     addNavItem(content, "home", "Home")
@@ -170,8 +143,39 @@ function buildNavItems() as Object
     addNavItem(content, "settings", "Settings")
     addNavItem(content, "exit", "Exit App")
 
+    actions = getContextActions(contextId)
+    for each action in actions
+        addNavItem(content, action.id, action.title)
+    end for
+
     return content
 end function
+
+function getContextActions(contextId as String) as Object
+    actions = []
+
+    if contextId = "home" then
+        actions.push({ id: "shuffle_everything", title: "Shuffle Everything" })
+        actions.push({ id: "shuffle_movies", title: "Shuffle Movies" })
+        actions.push({ id: "shuffle_tv", title: "Shuffle TV" })
+    else if contextId = "tv" then
+        actions.push({ id: "shuffle_library", title: "Shuffle Library" })
+        actions.push({ id: "shuffle_tv", title: "Shuffle TV" })
+    else if contextId = "movies" then
+        actions.push({ id: "shuffle_library", title: "Shuffle Library" })
+        actions.push({ id: "shuffle_movies", title: "Shuffle Movies" })
+    end if
+
+    return actions
+end function
+
+sub refreshNavList(contextId as String)
+    if m.navList = invalid then return
+    m.isRefreshingNav = true
+    m.navList.content = buildNavItemsForContext(contextId)
+    setNavSelectionById(contextId)
+    m.isRefreshingNav = false
+end sub
 
 sub addNavItem(content as Object, id as String, title as String)
     item = content.createChild("ContentNode")
@@ -179,12 +183,26 @@ sub addNavItem(content as Object, id as String, title as String)
     item.title = title
 end sub
 
+function isNavActionId(id as String) as Boolean
+    if id = invalid then return false
+    return (id = "shuffle_everything" or id = "shuffle_movies" or id = "shuffle_tv" or id = "shuffle_library" or id = "shuffle_show" or id = "shuffle_season")
+end function
+
 sub onNavSelected(event as Object)
     idx = event.getData()
     if m.navList = invalid or m.navList.content = invalid then return
+    if m.isRefreshingNav = true then return
 
     item = m.navList.content.getChild(idx)
     if item = invalid then return
+
+    if isNavActionId(item.id) then
+        handleAction(item.id)
+        return
+    end if
+
+    m.currentNavId = item.id
+    refreshNavList(m.currentNavId)
 
     ' Exit app is an explicit user action from the left rail
     if item.id = "exit" then
@@ -229,7 +247,7 @@ sub onNavSelected(event as Object)
             m.top.selectedLibraryId = m.selectedLibraryId
             m.selectedShowKey = ""
             m.selectedSeasonKey = ""
-            fetchMediaForLibrary(libId)
+            if m.top.hasField("openLibrary") then m.top.openLibrary = true
         else
             setConnectionState(false, "No TV library found")
         end if
@@ -243,40 +261,11 @@ sub onNavSelected(event as Object)
             m.top.selectedLibraryId = m.selectedLibraryId
             m.selectedShowKey = ""
             m.selectedSeasonKey = ""
-            fetchMediaForLibrary(libId)
+            if m.top.hasField("openLibrary") then m.top.openLibrary = true
         else
             setConnectionState(false, "No Movies library found")
         end if
         return
-    end if
-end sub
-
-sub onRetrySelected(event as Object)
-    host = m.top.serverHost
-    if host = invalid then host = ""
-    host = normalizeHostInput(host)
-
-    if host = "" then
-        setConnectionState(false, "Disconnected: set server in Settings")
-        return
-    end if
-
-    m.baseUrl = buildBaseUrlFromHost(host)
-    startAutoConnect()
-end sub
-
-sub onTopActionSelected(event as Object)
-    idx = event.getData()
-    if idx = invalid then return
-
-    if idx = 0 then
-        playContinueWatching()
-    else if idx = 1 then
-        shuffleByKind("tv")
-    else if idx = 2 then
-        shuffleByKind("movies")
-    else if idx = 3 then
-        shuffleEverything()
     end if
 end sub
 
@@ -445,7 +434,7 @@ sub onRowItemSelected(event as Object)
             m.top.selectedLibraryId = m.selectedLibraryId
             m.selectedShowKey = ""
             m.selectedSeasonKey = ""
-            fetchMediaForLibrary(node.id)
+            if m.top.hasField("openLibrary") then m.top.openLibrary = true
         end if
         return
     end if
@@ -502,13 +491,6 @@ sub onRowItemSelected(event as Object)
         return
     end if
 
-    if rowType = "actions" then
-        node = getRowItemNode(rowIndex, itemIndex)
-        if node <> invalid and node.id <> invalid then
-            handleAction(node.id)
-        end if
-        return
-    end if
 end sub
 
 function buildQueueForRow(rowIndex as Integer) as Object
@@ -595,6 +577,7 @@ sub onTvShowsResponse(event as Object)
     apiTask = event.getRoSGNode()
     if apiTask.responseCode <> 200 then
         m.tvShowKeys = []
+        m.tvShowPosters = {}
         buildHomeRows()
         return
     end if
@@ -602,11 +585,13 @@ sub onTvShowsResponse(event as Object)
     json = ParseJson(apiTask.response)
     if json = invalid or json.items = invalid then
         m.tvShowKeys = []
+        m.tvShowPosters = {}
         buildHomeRows()
         return
     end if
 
     shows = []
+    showPosters = {}
     seen = {}
     for each g in json.items
         if g.group_key <> invalid then
@@ -615,10 +600,17 @@ sub onTvShowsResponse(event as Object)
                 seen[s] = true
                 shows.push(s)
             end if
+            if s <> "" and showPosters[s] = invalid then
+                if g.poster_url <> invalid and g.poster_url <> "" then
+                    showPosters[s] = normalizePosterUrl(g.poster_url)
+                end if
+            end if
         end if
     end for
     shows.Sort()
     m.tvShowKeys = shows
+    m.tvShowPosters = showPosters
+    startShowPosterFetch()
 
     if m.selectedShowKey <> "" then
         fetchTvSeasons(m.selectedShowKey)
@@ -626,6 +618,50 @@ sub onTvShowsResponse(event as Object)
         m.tvSeasonGroups = []
         buildHomeRows()
     end if
+end sub
+
+sub startShowPosterFetch()
+    if m.tvShowKeys = invalid then return
+    m.pendingShowPosterKeys = []
+    for each s in m.tvShowKeys
+        m.pendingShowPosterKeys.push(s)
+    end for
+    m.pendingShowPosterIndex = 0
+    fetchNextShowPoster()
+end sub
+
+sub fetchNextShowPoster()
+    if m.pendingShowPosterKeys = invalid then return
+    if m.pendingShowPosterIndex >= m.pendingShowPosterKeys.Count() then
+        buildHomeRows()
+        return
+    end if
+
+    showKey = m.pendingShowPosterKeys[m.pendingShowPosterIndex]
+    m.pendingShowPosterIndex = m.pendingShowPosterIndex + 1
+    m.currentShowPosterKey = showKey
+
+    apiTask = CreateObject("roSGNode", "ApiTask")
+    apiTask.url = m.baseUrl + "/artwork?internal_key=" + urlEncode("group_key:tv:" + showKey)
+    apiTask.observeField("response", "onShowPosterResponse")
+    apiTask.control = "RUN"
+end sub
+
+sub onShowPosterResponse(event as Object)
+    showKey = m.currentShowPosterKey
+    apiTask = event.getRoSGNode()
+    if apiTask.responseCode = 200 then
+        json = ParseJson(apiTask.response)
+        if json <> invalid and json.item <> invalid and json.item.poster_url <> invalid then
+            posterUrl = normalizePosterUrl(json.item.poster_url)
+            if posterUrl <> "" then
+                if m.tvShowPosters = invalid then m.tvShowPosters = {}
+                m.tvShowPosters[showKey] = posterUrl
+            end if
+        end if
+    end if
+
+    fetchNextShowPoster()
 end sub
 
 sub fetchTvSeasons(showKey as String)
@@ -660,7 +696,11 @@ sub onTvSeasonsResponse(event as Object)
     seasons = []
     for each g in json.items
         if g.group_key <> invalid then
-            seasons.push({ group_key: g.group_key, media_count: g.media_count })
+            seasons.push({
+                group_key: g.group_key,
+                media_count: g.media_count,
+                poster_url: normalizePosterUrl(g.poster_url)
+            })
         end if
     end for
     m.tvSeasonGroups = seasons
@@ -684,19 +724,10 @@ sub buildHomeRows()
         defaultPoster = "pkg:/images/icon_side_hd.png"
         for each item in m.continueWatching
             node = cwRow.createChild("ContentNode")
-            if item.media_file_id <> invalid then node.id = item.media_file_id.toStr()
-            if item.title <> invalid and item.title <> "" then
-                node.title = item.title
-            else
-                node.title = "Untitled"
-            end if
+            node.id = getItemId(item)
+            node.title = getItemTitle(item)
 
-            posterUrl = ""
-            if item.poster_url <> invalid and item.poster_url <> "" then
-                posterUrl = item.poster_url
-            else if item.posterUrl <> invalid and item.posterUrl <> "" then
-                posterUrl = item.posterUrl
-            end if
+            posterUrl = getPosterUrlForItem(item)
             if posterUrl <> "" and Left(posterUrl, 1) = "/" then
                 posterUrl = m.baseUrl + posterUrl
             end if
@@ -715,6 +746,7 @@ sub buildHomeRows()
     libsRow.title = "Libraries"
     m.rowTypes.push("libraries")
 
+    defaultPoster = "pkg:/images/icon_side_hd.png"
     for each lib in m.libraries
         libNode = libsRow.createChild("ContentNode")
         if lib.id <> invalid then libNode.id = lib.id.toStr()
@@ -726,6 +758,11 @@ sub buildHomeRows()
         if m.selectedLibraryId <> "" and libNode.id = m.selectedLibraryId then
             libNode.title = libNode.title + " (Selected)"
         end if
+
+        posterUrl = getLibraryPosterUrl(lib)
+        if posterUrl = "" then posterUrl = defaultPoster
+        libNode.HDPosterUrl = posterUrl
+        libNode.SDPosterUrl = posterUrl
     end for
 
     if isTvLibrary() and m.tvShowKeys.Count() > 0 then
@@ -735,7 +772,13 @@ sub buildHomeRows()
         for each s in m.tvShowKeys
             node = showsRow.createChild("ContentNode")
             node.id = s
-            node.title = s
+            node.title = displayShowTitle(s)
+            posterUrl = ""
+            if m.tvShowPosters <> invalid then posterUrl = m.tvShowPosters[s]
+            if posterUrl <> "" then
+                node.HDPosterUrl = posterUrl
+                node.SDPosterUrl = posterUrl
+            end if
         end for
     end if
 
@@ -747,6 +790,10 @@ sub buildHomeRows()
             node = seasonsRow.createChild("ContentNode")
             node.id = g.group_key
             node.title = "Season " + parseSeasonKey(g.group_key)
+            if g.poster_url <> invalid and g.poster_url <> "" then
+                node.HDPosterUrl = g.poster_url
+                node.SDPosterUrl = g.poster_url
+            end if
         end for
     end if
 
@@ -762,19 +809,6 @@ sub buildHomeRows()
             node = recentRow.createChild("ContentNode")
             applyMediaNode(item, node, defaultPoster)
         end for
-    end if
-
-    actionsRow = contentRoot.createChild("ContentNode")
-    actionsRow.title = "Actions"
-    m.rowTypes.push("actions")
-    addAction(actionsRow, "shuffle_library", "Shuffle Library")
-    addAction(actionsRow, "shuffle_everything", "Shuffle Everything")
-    addAction(actionsRow, "shuffle_movies", "Shuffle Movies")
-    addAction(actionsRow, "shuffle_tv", "Shuffle TV")
-    if isTvLibrary() then
-        addAction(actionsRow, "shuffle_show", "Shuffle Show")
-        addAction(actionsRow, "shuffle_season", "Shuffle Season")
-        addAction(actionsRow, "play_season", "Play Season (Order)")
     end if
 
     mediaRow = contentRoot.createChild("ContentNode")
@@ -823,12 +857,6 @@ function filterByGroupKey(items as Object, key as String, exact as Boolean) as O
     end for
     return filtered
 end function
-
-sub addAction(row as Object, id as String, title as String)
-    node = row.createChild("ContentNode")
-    node.id = id
-    node.title = title
-end sub
 
 sub handleAction(actionId as String)
     if actionId = "shuffle_library" then
@@ -994,11 +1022,13 @@ end sub
 sub openQueueFromItems(items as Object, startIndex as Integer)
     queue = []
     for each it in items
+        id = getItemId(it)
+        title = getItemTitle(it)
         queue.push({
-            id: it.id,
-            title: it.title,
+            id: id,
+            title: title,
             poster: getPosterUrlForItem(it),
-            url: buildPlaybackUrl(it.id),
+            url: buildPlaybackUrl(id),
             streamFormat: "hls"
         })
     end for
@@ -1007,12 +1037,14 @@ end sub
 
 sub openItem(item as Object, queue as Object, index as Integer)
     if item = invalid then return
+    id = getItemId(item)
+    title = getItemTitle(item)
     posterUrl = getPosterUrlForItem(item)
     m.top.selectedItem = {
-        id: item.id,
-        title: item.title,
+        id: id,
+        title: title,
         poster: posterUrl,
-        url: buildPlaybackUrl(item.id),
+        url: buildPlaybackUrl(id),
         streamFormat: "hls",
         queue: queue,
         queueIndex: index
@@ -1021,12 +1053,14 @@ end sub
 
 sub openItemAutoPlay(item as Object, queue as Object, index as Integer)
     if item = invalid then return
+    id = getItemId(item)
+    title = getItemTitle(item)
     posterUrl = getPosterUrlForItem(item)
     m.top.playNow = {
-        id: item.id,
-        title: item.title,
+        id: id,
+        title: title,
         poster: posterUrl,
-        url: buildPlaybackUrl(item.id),
+        url: buildPlaybackUrl(id),
         streamFormat: "hls",
         queue: queue,
         queueIndex: index
@@ -1041,6 +1075,10 @@ function getPosterUrlForItem(item as Object) as String
         posterUrl = item.posterUrl
     else if item.poster_path <> invalid and item.poster_path <> "" then
         posterUrl = item.poster_path
+    else if item.thumb_url <> invalid and item.thumb_url <> "" then
+        posterUrl = item.thumb_url
+    else if item.artwork_url <> invalid and item.artwork_url <> "" then
+        posterUrl = item.artwork_url
     end if
     if posterUrl <> "" and Left(posterUrl, 1) = "/" then
         posterUrl = m.baseUrl + posterUrl
@@ -1049,12 +1087,108 @@ function getPosterUrlForItem(item as Object) as String
     return posterUrl
 end function
 
+function normalizePosterUrl(url as Dynamic) as String
+    posterUrl = ""
+    if url <> invalid then posterUrl = url.toStr()
+    if posterUrl <> "" and Left(posterUrl, 1) = "/" then
+        posterUrl = m.baseUrl + posterUrl
+    end if
+    return posterUrl
+end function
+
+function getLibraryPosterUrl(lib as Object) as String
+    if lib = invalid then return ""
+    posterUrl = ""
+
+    if lib.poster_url <> invalid and lib.poster_url <> "" then
+        posterUrl = lib.poster_url
+    else if lib.posterUrl <> invalid and lib.posterUrl <> "" then
+        posterUrl = lib.posterUrl
+    else if lib.poster_path <> invalid and lib.poster_path <> "" then
+        posterUrl = lib.poster_path
+    else if lib.thumb_url <> invalid and lib.thumb_url <> "" then
+        posterUrl = lib.thumb_url
+    else if lib.thumbUrl <> invalid and lib.thumbUrl <> "" then
+        posterUrl = lib.thumbUrl
+    else if lib.artwork_url <> invalid and lib.artwork_url <> "" then
+        posterUrl = lib.artwork_url
+    else if lib.artworkUrl <> invalid and lib.artworkUrl <> "" then
+        posterUrl = lib.artworkUrl
+    else if lib.cover_url <> invalid and lib.cover_url <> "" then
+        posterUrl = lib.cover_url
+    else if lib.coverUrl <> invalid and lib.coverUrl <> "" then
+        posterUrl = lib.coverUrl
+    else if lib.image_url <> invalid and lib.image_url <> "" then
+        posterUrl = lib.image_url
+    else if lib.imageUrl <> invalid and lib.imageUrl <> "" then
+        posterUrl = lib.imageUrl
+    else if lib.image <> invalid and lib.image <> "" then
+        posterUrl = lib.image
+    else if lib.icon_url <> invalid and lib.icon_url <> "" then
+        posterUrl = lib.icon_url
+    else if lib.iconUrl <> invalid and lib.iconUrl <> "" then
+        posterUrl = lib.iconUrl
+    else if lib.poster <> invalid and lib.poster <> "" then
+        posterUrl = lib.poster
+    else if lib.cover <> invalid and lib.cover <> "" then
+        posterUrl = lib.cover
+    end if
+
+    if posterUrl <> "" and Left(posterUrl, 1) = "/" then
+        posterUrl = m.baseUrl + posterUrl
+    end if
+    return posterUrl
+end function
+
+function getItemId(item as Object) as String
+    if item = invalid then return ""
+    if item.media_file_id <> invalid then return item.media_file_id.toStr()
+    if item.id <> invalid then return item.id.toStr()
+    return ""
+end function
+
+function getItemTitle(item as Object) as String
+    if item = invalid then return "Untitled"
+    if item.title <> invalid and item.title <> "" then return item.title
+    if item.display_title <> invalid and item.display_title <> "" then return item.display_title
+    if item.name <> invalid and item.name <> "" then return item.name
+    if item.media_title <> invalid and item.media_title <> "" then return item.media_title
+    if item.file_path <> invalid and item.file_path <> "" then
+        derived = titleFromPath(item.file_path)
+        if derived <> "" then return derived
+    end if
+    return "Untitled"
+end function
+
+function titleFromPath(path as String) as String
+    if path = invalid or path = "" then return ""
+    p = path
+    parts = p.Split("/")
+    if parts <> invalid and parts.Count() > 0 then
+        p = parts[parts.Count() - 1]
+    end if
+    if p = invalid then return ""
+    extParts = p.Split(".")
+    if extParts <> invalid and extParts.Count() > 1 then
+        p = extParts[0]
+    end if
+    p = p.Replace("_", " ").Replace(".", " ").Replace("-", " ")
+    return p.Trim()
+end function
+
 function parseShowKey(gk as String) as String
     if gk = invalid then return ""
     if Left(gk, 3) <> "tv:" then return ""
     parts = gk.Split(":")
     if parts = invalid or parts.Count() < 2 then return ""
     return parts[1]
+end function
+
+function displayShowTitle(showKey as String) as String
+    if showKey = invalid then return ""
+    t = showKey
+    t = t.Replace("-", " ").Replace("_", " ").Replace(".", " ")
+    return t.Trim()
 end function
 
 function parseSeasonKey(gk as String) as String
@@ -1161,19 +1295,10 @@ end function
 sub applyMediaNode(item as Object, node as Object, defaultPoster as String)
     if item = invalid or node = invalid then return
 
-    if item.id <> invalid then node.id = item.id.toStr()
-    if item.title <> invalid and item.title <> "" then
-        node.title = item.title
-    else
-        node.title = "Untitled"
-    end if
+    node.id = getItemId(item)
+    node.title = getItemTitle(item)
 
-    posterUrl = ""
-    if item.poster_url <> invalid and item.poster_url <> "" then
-        posterUrl = item.poster_url
-    else if item.posterUrl <> invalid and item.posterUrl <> "" then
-        posterUrl = item.posterUrl
-    end if
+    posterUrl = getPosterUrlForItem(item)
 
     if posterUrl <> "" and Left(posterUrl, 1) = "/" then
         posterUrl = m.baseUrl + posterUrl
@@ -1185,15 +1310,11 @@ sub applyMediaNode(item as Object, node as Object, defaultPoster as String)
 end sub
 
 sub setConnectionState(isConnected as Boolean, msg as String)
-    if m.connectionStatus <> invalid then
-        m.connectionStatus.text = msg
-        m.connectionStatus.visible = not isConnected
-    end if
-    if m.connectionActions <> invalid then
-        m.connectionActions.visible = not isConnected
-    end if
     if m.connectionBadge <> invalid then
         m.connectionBadge.visible = isConnected
+    end if
+    if m.status <> invalid and msg <> invalid and msg <> "" then
+        m.status.text = msg
     end if
 end sub
 
@@ -1256,88 +1377,16 @@ end function
 function onKeyEvent(key as String, press as Boolean) as Boolean
     if press = false then return false
     ' If disconnected, allow moving focus to the Retry button
-    if m.connectionActions <> invalid and m.connectionActions.visible = true then
-        if key = "down" and m.navList <> invalid and m.navList.hasFocus() then
-            m.connectionActions.setFocus(true)
-            m.focusTarget = "retry"
-            return true
-        else if key = "up" and m.connectionActions <> invalid and m.connectionActions.hasFocus() then
-            if m.navList <> invalid then m.navList.setFocus(true)
-            m.focusTarget = "nav"
-            return true
-        end if
-    end if
-
     ' Move between left nav and main rows
     if key = "right" and m.navList <> invalid and m.navList.hasFocus() then
-        if m.topActions <> invalid then
-            m.topActions.setFocus(true)
-            m.focusTarget = "top"
-            return true
-        end if
         if m.rows <> invalid then
             m.rows.setFocus(true)
             m.focusTarget = "rows"
-            return true
-        else if m.connectionActions <> invalid and m.connectionActions.visible = true then
-            m.connectionActions.setFocus(true)
-            m.focusTarget = "retry"
             return true
         end if
     end if
 
     if key = "left" and m.rows <> invalid and m.rows.hasFocus() then
-        if m.navList <> invalid then
-            m.navList.setFocus(true)
-            m.focusTarget = "nav"
-            return true
-        end if
-    end if
-
-    if key = "up" and m.rows <> invalid and m.rows.hasFocus() then
-        if m.topActions <> invalid then
-            m.topActions.setFocus(true)
-            m.focusTarget = "top"
-            return true
-        end if
-    end if
-
-    if key = "left" and m.topActions <> invalid and m.topActions.hasFocus() then
-        if m.navList <> invalid then
-            m.navList.setFocus(true)
-            m.focusTarget = "nav"
-            return true
-        end if
-    end if
-
-    ' From Top Actions, RIGHT should move into the main rows
-    if key = "right" and m.topActions <> invalid and m.topActions.hasFocus() then
-        if m.rows <> invalid then
-            m.rows.setFocus(true)
-            m.focusTarget = "rows"
-            return true
-        end if
-    end if
-
-    ' From Top Actions, DOWN should move into the main rows
-    if key = "down" and m.topActions <> invalid and m.topActions.hasFocus() then
-        if m.rows <> invalid then
-            m.rows.setFocus(true)
-            m.focusTarget = "rows"
-            return true
-        end if
-    end if
-
-    ' From rows, UP should return to Top Actions (if present), otherwise stay in rows
-    if key = "up" and m.rows <> invalid and m.rows.hasFocus() then
-        if m.topActions <> invalid then
-            m.topActions.setFocus(true)
-            m.focusTarget = "top"
-            return true
-        end if
-    end if
-
-    if key = "left" and m.connectionActions <> invalid and m.connectionActions.hasFocus() then
         if m.navList <> invalid then
             m.navList.setFocus(true)
             m.focusTarget = "nav"

@@ -1,6 +1,7 @@
 sub init()
     m.serverLabel = m.top.findNode("serverLabel")
     m.connectionLabel = m.top.findNode("connectionLabel")
+    m.connectionBadge = m.top.findNode("connectionBadge")
     m.userLabel = m.top.findNode("userLabel")
     m.syncLabel = m.top.findNode("syncLabel")
     m.syncStatusLabel = m.top.findNode("syncStatusLabel")
@@ -417,6 +418,16 @@ sub updateConnectionLabel(value as String)
     else
         m.connectionLabel.text = value
     end if
+    updateConnectionBadge(value)
+end sub
+
+sub updateConnectionBadge(value as String)
+    if m.connectionBadge = invalid then return
+    if value = invalid then
+        m.connectionBadge.visible = false
+        return
+    end if
+    m.connectionBadge.visible = (Instr(1, LCase(value), "ok") > 0)
 end sub
 
 sub testConnection()

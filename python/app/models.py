@@ -16,15 +16,19 @@ from python.db import (
     get_playlist_items,
     get_playlists_for_user,
     get_recently_added,
+    get_setting,
     get_user_id,
+    list_settings,
     move_playlist_item,
     remove_item_from_playlist,
     rename_playlist,
+    set_setting,
     list_library_media_files,
     list_library_groups,
     attach_artwork,
     detach_artwork,
     get_artwork_for_internal_key,
+    list_external_artwork,
 )
 
 
@@ -119,6 +123,26 @@ class MediaServerService:
         with self.db.tx() as conn:
             items, total = get_continue_watching_groups(conn, user_id=user_id, page=page)
         return ServiceResult(items=items, total=total, limit=limit, offset=offset)
+
+    # -----------------
+    # App Settings (simple key/value)
+    # -----------------
+
+    def get_setting(self, key: str) -> str | None:
+        self._init_db()
+        with self.db.tx() as conn:
+            return get_setting(conn, key=key)
+
+    def list_settings(self, keys: List[str] | None = None) -> List[Dict[str, Any]]:
+        self._init_db()
+        with self.db.tx() as conn:
+            return list_settings(conn, keys=keys)
+
+    def set_settings(self, settings: Dict[str, Any]) -> None:
+        self._init_db()
+        with self.db.tx() as conn:
+            for k, v in (settings or {}).items():
+                set_setting(conn, key=str(k), value=None if v is None else str(v))
 
     # -----------------
     # Playlists
@@ -252,6 +276,13 @@ class MediaServerService:
         if not row:
             return None
         return ArtworkRecord(**row)
+
+    def list_artwork(self, limit: int, offset: int) -> ServiceResult:
+        self._init_db()
+        page = Page(limit=limit, offset=offset)
+        with self.db.tx() as conn:
+            items, total = list_external_artwork(conn, page=page)
+        return ServiceResult(items=items, total=total, limit=limit, offset=offset)
 
     def attach_artwork(
         self,

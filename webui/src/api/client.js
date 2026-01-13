@@ -2,8 +2,15 @@
 // Why: keeps pages/controllers from duplicating fetch logic.
 
 // During development, the WebUI runs on port 5173 and the backend API on port 8765.
-// This is intentional for split-port dev: always call API at 127.0.0.1:8765.
-const DEFAULT_BASE_URL = "http://127.0.0.1:8765";
+// In production (served by the backend), use same-origin.
+const DEFAULT_BASE_URL = (() => {
+  if (typeof window === "undefined") return "http://127.0.0.1:8765";
+  const host = window.location.hostname;
+  if (host === "127.0.0.1" || host === "localhost") {
+    return "http://127.0.0.1:8765";
+  }
+  return window.location.origin;
+})();
 
 export function createApiClient({ baseUrl = DEFAULT_BASE_URL } = {}) {
   async function request(path, { method = "GET", json, headers = {} } = {}) {

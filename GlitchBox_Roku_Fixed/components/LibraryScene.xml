@@ -2,12 +2,50 @@
 <component name="LibraryScene" extends="Group">
   <script type="text/brightscript" uri="pkg:/components/LibraryScene.brs" />
   <interface>
+    <field id="serverHost" type="string" />
     <field id="libraryId" type="string" />
+    <field id="libraryName" type="string" />
+    <field id="libraryKind" type="string" />
     <field id="selectedItem" type="assocarray" />
+    <field id="playNow" type="assocarray" />
+    <field id="backRequested" type="boolean" />
   </interface>
 
   <children>
     <Rectangle id="bg" width="1280" height="720" color="#0B0B10" />
-    <Label id="title" translation="[60, 40]" text="Library (stub)" font="font:LargeSystemFont" color="#FFFFFF" />
+
+    <!-- Left rail actions -->
+    <Group id="leftRail" translation="[40, 40]">
+      <Rectangle id="railBg" translation="[0, 0]" width="220" height="640" color="#121218" opacity="0.9" />
+      <Label id="railTitle" translation="[0, 0]" text="Library" font="font:LargeSystemFont" color="#FFFFFF" />
+      <LabelList
+        id="actions"
+        translation="[0, 60]"
+        itemSize="[180, 40]"
+        itemSpacing="[0, 8]"
+        font="font:MediumSystemFont"
+        color="#B8B8C5"
+        focusedColor="#FFD54A"
+        focusBitmapBlendColor="#000000"
+        visible="true" />
+    </Group>
+
+    <Label id="title" translation="[280, 40]" text="Library" font="font:LargeSystemFont" color="#FFFFFF" />
+    <Label id="status" translation="[280, 80]" text="" font="font:SmallSystemFont" color="#B8B8C5" />
+
+    <RowList
+      id="rows"
+      translation="[280, 120]"
+      itemComponentName="RowListItem"
+      rowItemSize="[[240, 135]]"
+      itemSpacing="[12, 0]"
+      rowItemSpacing="[[12, 0]]"
+      rowHeights="[160]"
+      rowLabelColor="#FFFFFF"
+      rowLabelFont="font:MediumSystemFont"
+      drawFocusFeedback="true"
+      vertFocusAnimationStyle="floatingFocus"
+      showRowLabel="[true]"
+      visible="true" />
   </children>
 </component>

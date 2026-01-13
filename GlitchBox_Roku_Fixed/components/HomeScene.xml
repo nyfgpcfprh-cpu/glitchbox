@@ -7,6 +7,7 @@
     <field id="serverHost" type="string" />
     <field id="openSettings" type="boolean" />
     <field id="openSearch" type="boolean" />
+    <field id="openLibrary" type="boolean" />
     <field id="selectedLibraryId" type="string" />
     <field id="libraries" type="array" />
     <field id="syncRequested" type="boolean" />
@@ -32,28 +33,8 @@
         focusBitmapBlendColor="#000000"
         visible="true" />
 
-      <Label id="serverLabel" translation="[0, 320]" text="Server: not set (open Settings)" font="font:SmallSystemFont" color="#A9A9B2" />
-      <Group id="connectionBadge" translation="[0, 360]" visible="false">
-        <Rectangle id="badgeBg" width="160" height="28" color="#1E4D2B" opacity="0.9" />
-        <Label id="badgeLabel" translation="[10, 6]" text="Connected" font="font:SmallSystemFont" color="#E5FFE8" />
-      </Group>
     </Group>
 
-
-    <!-- Top actions row -->
-    <TopActionsRow id="topActions" translation="[280, 30]" />
-
-    <!-- connection status -->
-    <Label
-      id="connectionStatus"
-      translation="[280, 110]"
-      text="Disconnected: set server in Settings"
-      font="font:SmallSystemFont"
-      color="#B8B8C5" />
-
-    <ButtonGroup
-      id="connectionActions"
-      translation="[280, 140]" />
 
     <!-- Content rows -->
     <RowList
@@ -74,5 +55,6 @@
     <Label id="status" translation="[280, 680]" text="Select an item to view details" font="font:SmallSystemFont" color="#B8B8C5" />
 
     <LoadingOverlay id="loadingOverlay" visible="false" />
+
   </children>
 </component>

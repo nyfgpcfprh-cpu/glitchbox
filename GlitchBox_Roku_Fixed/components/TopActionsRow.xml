@@ -3,19 +3,18 @@
   <interface>
     <field id="actions" type="array" />
     <field id="actionSelected" type="integer" />
+    <field id="selectedIndex" type="integer" />
   </interface>
 
   <children>
-    <RowList
+    <MarkupGrid
       id="list"
       translation="[0, 0]"
-      rowItemSize="[[200, 80]]"
-      rowHeights="[80]"
-      itemSpacing="[20, 0]"
-      rowItemSpacing="[[20, 0]]"
-      showRowLabel="[false]"
+      focusable="true"
       drawFocusFeedback="true"
-      vertFocusAnimationStyle="floatingFocus" />
+      numColumns="4"
+      itemSize="[200, 80]"
+      itemSpacing="[20, 0]" />
   </children>
 
   <script type="text/brightscript" uri="pkg:/components/TopActionsRow.brs" />

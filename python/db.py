@@ -335,6 +335,17 @@ MIGRATIONS: List[Tuple[str, str]] = [
             ON external_artwork(updated_at);
         """,
     ),
+    (
+        "006_create_app_settings",
+        """
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """,
+    ),
 ]
 
 
@@ -760,8 +771,9 @@ def list_library_media_files(
         count_params_list.extend([like, like])
 
     items_sql = (
-        "SELECT mf.* "
+        "SELECT mf.*, ea.poster_url AS poster_url "
         "FROM media_files mf "
+        "LEFT JOIN external_artwork ea ON ea.internal_key = ('media_file:' || mf.id) "
         f"{where} "
         f"{order_by}"
     )
@@ -812,12 +824,13 @@ def list_library_groups(
     like = f"{px}%"
 
     items_sql = (
-        "SELECT mf.group_key AS group_key, COUNT(1) AS media_count "
+        "SELECT mf.group_key AS group_key, COUNT(1) AS media_count, ea.poster_url AS poster_url "
         "FROM media_files mf "
+        "LEFT JOIN external_artwork ea ON ea.internal_key = ('group_key:' || mf.group_key) "
         "WHERE mf.library_id = ? "
         "  AND mf.group_key IS NOT NULL "
         "  AND mf.group_key LIKE ? "
-        "GROUP BY mf.group_key "
+        "GROUP BY mf.group_key, ea.poster_url "
         "ORDER BY mf.group_key COLLATE NOCASE ASC"
     )
 
@@ -869,12 +882,14 @@ def get_continue_watching(
     items_sql = (
         "SELECT "
         "  mf.*, "
+        "  ea.poster_url AS poster_url, "
         "  pp.position_seconds, "
         "  pp.duration_seconds, "
         "  pp.completed, "
         "  pp.updated_at AS progress_updated_at "
         "FROM playback_progress pp "
         "JOIN media_files mf ON mf.id = pp.media_file_id "
+        "LEFT JOIN external_artwork ea ON ea.internal_key = ('media_file:' || mf.id) "
         "WHERE pp.user_id = ? "
         "  AND pp.completed = 0 "
         "ORDER BY pp.updated_at DESC, pp.id DESC"
@@ -936,13 +951,15 @@ def get_continue_watching_groups(
         "  pp.media_file_id AS representative_media_file_id, "
         "  pp.position_seconds, "
         "  pp.duration_seconds, "
+        "  ea.poster_url AS poster_url, "
         "  MAX(pp.updated_at) AS last_activity_at "
         "FROM playback_progress pp "
         "JOIN media_files mf ON mf.id = pp.media_file_id "
+        "LEFT JOIN external_artwork ea ON ea.internal_key = ('group_key:' || mf.group_key) "
         "WHERE pp.user_id = ? "
         "  AND pp.completed = 0 "
         "  AND mf.group_key IS NOT NULL "
-        "GROUP BY mf.group_key "
+        "GROUP BY mf.group_key, ea.poster_url "
         "ORDER BY last_activity_at DESC"
     )
 
@@ -1035,9 +1052,11 @@ def get_playlist_items(
         "  pi.media_file_id, "
         "  pi.position, "
         "  pi.created_at AS playlist_item_created_at, "
-        "  mf.* "
+        "  mf.*, "
+        "  ea.poster_url AS poster_url "
         "FROM playlist_items pi "
         "JOIN media_files mf ON mf.id = pi.media_file_id "
+        "LEFT JOIN external_artwork ea ON ea.internal_key = ('media_file:' || mf.id) "
         "WHERE pi.playlist_id = ? "
         "ORDER BY pi.position ASC, pi.id ASC"
     )
@@ -1369,3 +1388,69 @@ def list_external_artwork(
         count_params=(),
         page=page,
     )
+
+
+# -----------------------------
+# App settings (simple key/value)
+# -----------------------------
+
+def get_setting(conn: sqlite3.Connection, *, key: str) -> Optional[str]:
+    k = (key or "").strip()
+    if not k:
+        raise ValueError("key is required")
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?;",
+        (k,),
+    ).fetchone()
+    return str(row["value"]) if row and row["value"] is not None else None
+
+
+def set_setting(conn: sqlite3.Connection, *, key: str, value: Optional[str]) -> None:
+    k = (key or "").strip()
+    if not k:
+        raise ValueError("key is required")
+    v = None if value is None else str(value).strip()
+
+    if v is None or v == "":
+        delete_setting(conn, key=k)
+        return
+
+    now = utc_now_iso()
+    conn.execute(
+        """
+        INSERT INTO app_settings (key, value, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value=excluded.value,
+            updated_at=excluded.updated_at;
+        """,
+        (k, v, now, now),
+    )
+
+
+def delete_setting(conn: sqlite3.Connection, *, key: str) -> None:
+    k = (key or "").strip()
+    if not k:
+        raise ValueError("key is required")
+    conn.execute("DELETE FROM app_settings WHERE key = ?;", (k,))
+
+
+def list_settings(
+    conn: sqlite3.Connection,
+    *,
+    keys: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    if keys:
+        ks = [str(k).strip() for k in keys if str(k).strip()]
+        if not ks:
+            return []
+        placeholders = ",".join("?" for _ in ks)
+        rows = conn.execute(
+            f"SELECT key, value, updated_at FROM app_settings WHERE key IN ({placeholders}) ORDER BY key ASC;",
+            tuple(ks),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT key, value, updated_at FROM app_settings ORDER BY key ASC;"
+        ).fetchall()
+    return [dict(r) for r in rows]

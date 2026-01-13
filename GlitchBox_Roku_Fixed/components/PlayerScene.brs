@@ -67,6 +67,7 @@ sub onPlaybackItemChanged()
     if item = invalid then return
 
     if m.video = invalid then return
+    syncQueueFromItem(item)
 
     if item.url <> invalid and item.url <> "" then
         content = CreateObject("roSGNode", "ContentNode")
@@ -115,9 +116,9 @@ sub onActionSelected(event as Object)
     else if idx = 1 then
         playFromStart()
     else if idx = 2 then
-        m.top.actionSelected = "prev"
+        skipQueue(-1)
     else if idx = 3 then
-        m.top.actionSelected = "skip"
+        skipQueue(1)
     else if idx = 4 then
         showQueueOverlay(not m.queueOverlay.visible)
     else if idx = 5 then
@@ -126,6 +127,38 @@ sub onActionSelected(event as Object)
         stopPlayback()
     end if
     resetActionAutoHide()
+end sub
+
+sub syncQueueFromItem(item as Object)
+    if item = invalid then return
+    if item.queue <> invalid then
+        m.top.queue = item.queue
+    end if
+    if item.queueIndex <> invalid then
+        m.top.queueIndex = item.queueIndex
+    end if
+    if m.queueOverlay <> invalid and m.queueOverlay.visible then
+        updateQueueOverlay()
+    end if
+end sub
+
+sub skipQueue(delta as Integer)
+    if m.top.queue = invalid or m.top.queueIndex = invalid then return
+    idx = m.top.queueIndex + delta
+    if idx < 0 or idx >= m.top.queue.Count() then return
+    nextItem = m.top.queue[idx]
+    if nextItem = invalid then return
+
+    payload = {
+        id: nextItem.id,
+        title: nextItem.title,
+        poster: nextItem.poster,
+        url: nextItem.url,
+        streamFormat: nextItem.streamFormat,
+        queue: m.top.queue,
+        queueIndex: idx
+    }
+    m.top.playbackItem = payload
 end sub
 
 sub togglePlayPause()
@@ -174,7 +207,7 @@ function onKeyEvent(key as String, press as Boolean) as Boolean
             showQueueOverlay(false)
             return true
         end if
-        saveProgress()
+        stopPlayback()
         m.top.backRequested = true
         return true
     end if

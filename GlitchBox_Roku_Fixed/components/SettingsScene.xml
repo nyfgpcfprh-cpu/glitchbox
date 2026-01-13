@@ -15,14 +15,18 @@
 
     <Label id="serverLabel" translation="[60, 120]" text="Server: not set" font="font:MediumSystemFont" color="#CCCCCC" />
     <Label id="connectionLabel" translation="[60, 140]" text="Connection: not tested" font="font:SmallSystemFont" color="#B8B8C5" />
-    <Label id="userLabel" translation="[60, 180]" text="User: not set" font="font:SmallSystemFont" color="#B8B8C5" />
-    <Label id="userSwitchHint" translation="[60, 195]" text="Use Create User to switch" font="font:SmallSystemFont" color="#7D7D88" />
-    <Label id="syncLabel" translation="[60, 205]" text="Last Sync: never" font="font:SmallSystemFont" color="#B8B8C5" />
-    <Label id="syncStatusLabel" translation="[60, 225]" text="Sync Status: idle" font="font:SmallSystemFont" color="#B8B8C5" />
+    <Group id="connectionBadge" translation="[60, 160]" visible="false">
+      <Rectangle id="badgeBg" width="160" height="28" color="#1E4D2B" opacity="0.9" />
+      <Label id="badgeLabel" translation="[10, 6]" text="Connected" font="font:SmallSystemFont" color="#E5FFE8" />
+    </Group>
+    <Label id="userLabel" translation="[60, 200]" text="User: not set" font="font:SmallSystemFont" color="#B8B8C5" />
+    <Label id="userSwitchHint" translation="[60, 215]" text="Use Create User to switch" font="font:SmallSystemFont" color="#7D7D88" />
+    <Label id="syncLabel" translation="[60, 225]" text="Last Sync: never" font="font:SmallSystemFont" color="#B8B8C5" />
+    <Label id="syncStatusLabel" translation="[60, 245]" text="Sync Status: idle" font="font:SmallSystemFont" color="#B8B8C5" />
 
     <ButtonGroup
       id="actions"
-      translation="[60, 260]" />
+      translation="[60, 280]" />
 
     <Label id="userHistoryLabel" translation="[340, 120]" text="User History" font="font:MediumSystemFont" color="#CCCCCC" />
     <LabelList
