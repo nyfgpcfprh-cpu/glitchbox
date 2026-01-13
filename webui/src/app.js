@@ -1020,6 +1020,10 @@ function SettingsPage() {
   const wrap = h("div");
   wrap.appendChild(renderPageTitle("Settings", "API keys are stored on the server."));
 
+  let lastSettings = { tmdb_api_key: "", opensubtitles_api_key: "" };
+  let tmdbDirty = false;
+  let osDirty = false;
+
   const box = h("div", {
     style: {
       padding: "12px",
@@ -1035,13 +1039,33 @@ function SettingsPage() {
   const tmdbRow = h("div", { style: { marginBottom: "10px" } });
   tmdbRow.appendChild(h("div", { style: { fontWeight: "600", marginBottom: "4px" } }, ["TMDB API Key"]));
   const tmdbInput = h("input", { type: "password", style: "width: 100%; padding: 6px;" });
+  tmdbInput.addEventListener("input", () => {
+    tmdbDirty = true;
+  });
   tmdbRow.appendChild(tmdbInput);
+  const tmdbClear = h("button", { style: { marginTop: "6px" } }, ["Clear TMDB Key"]);
+  tmdbClear.addEventListener("click", () => {
+    if (!confirm("Clear the TMDB API key? This will remove it from the server.")) return;
+    tmdbInput.value = "";
+    tmdbDirty = true;
+  });
+  tmdbRow.appendChild(tmdbClear);
   box.appendChild(tmdbRow);
 
   const osRow = h("div", { style: { marginBottom: "10px" } });
   osRow.appendChild(h("div", { style: { fontWeight: "600", marginBottom: "4px" } }, ["OpenSubtitles API Key"]));
   const osInput = h("input", { type: "password", style: "width: 100%; padding: 6px;" });
+  osInput.addEventListener("input", () => {
+    osDirty = true;
+  });
   osRow.appendChild(osInput);
+  const osClear = h("button", { style: { marginTop: "6px" } }, ["Clear OpenSubtitles Key"]);
+  osClear.addEventListener("click", () => {
+    if (!confirm("Clear the OpenSubtitles API key? This will remove it from the server.")) return;
+    osInput.value = "";
+    osDirty = true;
+  });
+  osRow.appendChild(osClear);
   box.appendChild(osRow);
 
   const showRow = h("div", { style: { marginBottom: "10px" } });
@@ -1062,10 +1086,18 @@ function SettingsPage() {
     saveBtn.disabled = true;
     status.textContent = "Saving…";
     try {
-      await api.post("/settings", {
-        tmdb_api_key: String(tmdbInput.value || "").trim(),
-        opensubtitles_api_key: String(osInput.value || "").trim(),
-      });
+      const tmdbVal = String(tmdbInput.value || "").trim();
+      const osVal = String(osInput.value || "").trim();
+      const payload = {};
+      if (tmdbVal !== lastSettings.tmdb_api_key) payload.tmdb_api_key = tmdbVal;
+      if (osVal !== lastSettings.opensubtitles_api_key) payload.opensubtitles_api_key = osVal;
+      if (Object.keys(payload).length === 0) {
+        status.textContent = "No changes.";
+        return;
+      }
+      await api.post("/settings", payload);
+      if ("tmdb_api_key" in payload) lastSettings.tmdb_api_key = tmdbVal;
+      if ("opensubtitles_api_key" in payload) lastSettings.opensubtitles_api_key = osVal;
       status.textContent = "Saved.";
     } catch (err) {
       status.textContent = `ERROR: ${err?.message || String(err)}`;
@@ -1081,8 +1113,14 @@ function SettingsPage() {
     try {
       const res = await api.get("/settings");
       const s = res?.settings || {};
-      tmdbInput.value = s.tmdb_api_key || "";
-      osInput.value = s.opensubtitles_api_key || "";
+      lastSettings = {
+        tmdb_api_key: s.tmdb_api_key || "",
+        opensubtitles_api_key: s.opensubtitles_api_key || "",
+      };
+      if (!tmdbDirty) tmdbInput.value = lastSettings.tmdb_api_key;
+      if (!osDirty) osInput.value = lastSettings.opensubtitles_api_key;
+      tmdbDirty = false;
+      osDirty = false;
       status.textContent = "Loaded.";
     } catch (err) {
       status.textContent = `ERROR: ${err?.message || String(err)}`;
