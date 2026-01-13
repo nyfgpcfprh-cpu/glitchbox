@@ -32,6 +32,7 @@ const API_BASE = (() => {
   }
   return "http://127.0.0.1:8765";
 })();
+const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 
 // Optional server-side scan endpoint template.
 // We DO NOT guess routes. If you want a Scan button, provide a template like:
@@ -188,47 +189,25 @@ function effectivePosterUrlForEpisode({ showSlug, season2, mediaFileId }) {
 }
 
 async function setPosterFlowForTvShow({ router, showSlug, showName }) {
-  const defaultQ = showName || showSlug || "";
-  const q = prompt("TMDB search (tv) — set SHOW poster:", defaultQ);
-  if (!q) return;
-
-  let items;
-  try {
-    items = await tmdbSearchTv(q);
-  } catch (e) {
-    alert(`TMDB search failed: ${e?.message || e}`);
+  const baseTitle = showName || showSlug || "";
+  if (looksLikeSampleTitle(baseTitle)) {
+    alert("Skipping sample item.");
+    return;
+  }
+  const q = buildPosterSearchTitle({ title: baseTitle });
+  if (!q) {
+    alert("No title to search.");
     return;
   }
 
-  if (!items.length) {
-    alert("No results.");
-    return;
-  }
-
-  const max = Math.min(10, items.length);
-  const previewLines = items
-    .slice(0, max)
-    .map((it, idx) => {
-      const yr = it.year ? ` (${it.year})` : "";
-      const p = it.poster_path ? " [poster]" : "";
-      return `${idx + 1}. ${it.title}${yr}${p}`;
-    })
-    .join("\n");
-
-  const pickRaw = prompt(`Pick a result (1-${max}) for SHOW poster:\n\n${previewLines}`, "1");
-  if (!pickRaw) return;
-
-  const pick = Number(pickRaw);
-  if (!Number.isFinite(pick) || pick < 1 || pick > max) {
-    alert("Invalid selection.");
-    return;
-  }
-
-  const chosen = items[pick - 1];
-  if (!chosen?.poster_path) {
-    alert("Chosen result has no poster.");
-    return;
-  }
+  const candidateKey = showSlug ? posterCandidateKeyForShow(showSlug) : null;
+  const chosen = await pickTmdbPosterForQuery({
+    tmdbType: "tv",
+    query: q,
+    label: baseTitle || q,
+    candidateKey,
+  });
+  if (!chosen?.poster_path) return;
 
   let url;
   try {
@@ -244,47 +223,23 @@ async function setPosterFlowForTvShow({ router, showSlug, showName }) {
 
 async function setPosterFlowForTvSeason({ router, showSlug, showName, season2 }) {
   const s2 = String(season2 || "").padStart(2, "0");
-  const defaultQ = showName ? `${showName} Season ${s2}` : (showSlug ? `${showSlug} Season ${s2}` : "");
-  const q = prompt(`TMDB search (tv) — set SEASON ${s2} poster:`, defaultQ);
-  if (!q) return;
-
-  let items;
-  try {
-    items = await tmdbSearchTv(q);
-  } catch (e) {
-    alert(`TMDB search failed: ${e?.message || e}`);
+  const baseTitle = showName ? `${showName} Season ${s2}` : (showSlug ? `${showSlug} Season ${s2}` : "");
+  if (looksLikeSampleTitle(baseTitle)) {
+    alert("Skipping sample item.");
+    return;
+  }
+  const q = buildPosterSearchTitle({ title: baseTitle });
+  if (!q) {
+    alert("No title to search.");
     return;
   }
 
-  if (!items.length) {
-    alert("No results.");
-    return;
-  }
-
-  const max = Math.min(10, items.length);
-  const previewLines = items
-    .slice(0, max)
-    .map((it, idx) => {
-      const yr = it.year ? ` (${it.year})` : "";
-      const p = it.poster_path ? " [poster]" : "";
-      return `${idx + 1}. ${it.title}${yr}${p}`;
-    })
-    .join("\n");
-
-  const pickRaw = prompt(`Pick a result (1-${max}) for SEASON ${s2} poster:\n\n${previewLines}`, "1");
-  if (!pickRaw) return;
-
-  const pick = Number(pickRaw);
-  if (!Number.isFinite(pick) || pick < 1 || pick > max) {
-    alert("Invalid selection.");
-    return;
-  }
-
-  const chosen = items[pick - 1];
-  if (!chosen?.poster_path) {
-    alert("Chosen result has no poster.");
-    return;
-  }
+  const chosen = await pickTmdbPosterForQuery({
+    tmdbType: "tv",
+    query: q,
+    label: baseTitle || q,
+  });
+  if (!chosen?.poster_path) return;
 
   let url;
   try {
@@ -362,6 +317,216 @@ async function tmdbSearchTv(query) {
   return Array.isArray(data?.items) ? data.items : [];
 }
 
+const POSTER_CANDIDATE_INFO = new Map();
+const POSTER_CANDIDATE_INFLIGHT = new Set();
+
+function posterCandidateKeyForMediaId(id) {
+  return `movie:${String(id)}`;
+}
+
+function posterCandidateKeyForShow(showSlug) {
+  return `tv_show:${String(showSlug)}`;
+}
+
+function makeMultiPosterBadge() {
+  const badge = h("span", {
+    style: {
+      display: "inline-block",
+      marginLeft: "6px",
+      padding: "0 6px",
+      border: "1px solid #bbb",
+      borderRadius: "10px",
+      fontSize: "11px",
+      fontWeight: "600",
+      color: "#444",
+      background: "#f6f6f6",
+      visibility: "hidden",
+    },
+    title: "Multiple TMDB matches available",
+  }, ["?"]);
+  return badge;
+}
+
+async function ensurePosterCandidateInfo({ key, tmdbType, query }) {
+  if (!key || !query) return null;
+  const cached = POSTER_CANDIDATE_INFO.get(key);
+  if (cached) return cached;
+  if (POSTER_CANDIDATE_INFLIGHT.has(key)) return null;
+  POSTER_CANDIDATE_INFLIGHT.add(key);
+  try {
+    const items = tmdbType === "tv" ? await tmdbSearchTv(query) : await tmdbSearchMovies(query);
+    const count = (items || []).filter((it) => it && it.poster_path).length;
+    const info = { count, query };
+    POSTER_CANDIDATE_INFO.set(key, info);
+    return info;
+  } catch {
+    return null;
+  } finally {
+    POSTER_CANDIDATE_INFLIGHT.delete(key);
+  }
+}
+
+function attachMultiPosterBadge({ badgeEl, key, tmdbType, query }) {
+  if (!badgeEl || !key || !query) return;
+  const cached = POSTER_CANDIDATE_INFO.get(key);
+  if (cached && cached.count > 1) {
+    badgeEl.style.visibility = "visible";
+    return;
+  }
+  ensurePosterCandidateInfo({ key, tmdbType, query }).then((info) => {
+    if (info && info.count > 1) badgeEl.style.visibility = "visible";
+  });
+}
+
+function openPosterPickerModal({ title, items, tmdbType }) {
+  return new Promise((resolve) => {
+    const overlay = h("div", {
+      style: {
+        position: "fixed",
+        inset: "0",
+        background: "rgba(0,0,0,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+        zIndex: "9999",
+      },
+    });
+
+    const box = h("div", {
+      style: {
+        background: "#fff",
+        borderRadius: "8px",
+        maxWidth: "960px",
+        width: "100%",
+        maxHeight: "85vh",
+        display: "flex",
+        flexDirection: "column",
+        border: "1px solid #ddd",
+      },
+    });
+
+    const header = h("div", {
+      style: {
+        padding: "10px 12px",
+        borderBottom: "1px solid #eee",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "12px",
+      },
+    });
+    header.appendChild(h("div", { style: { fontWeight: "600" } }, [
+      `Multiple posters found${title ? `: ${title}` : ""}`,
+    ]));
+    const closeBtn = h("button", {}, ["Cancel"]);
+    header.appendChild(closeBtn);
+    box.appendChild(header);
+
+    const body = h("div", {
+      style: {
+        padding: "12px",
+        overflow: "auto",
+      },
+    });
+
+    const grid = h("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+        gap: "12px",
+      },
+    });
+
+    for (const it of items) {
+      const posterUrl = tmdbImageUrl(it.poster_path, "w185");
+      const card = h("button", {
+        style: {
+          border: "1px solid #ddd",
+          borderRadius: "6px",
+          padding: "6px",
+          textAlign: "left",
+          background: "#fff",
+          cursor: "pointer",
+        },
+      });
+      const img = h("img", {
+        src: posterUrl,
+        alt: "poster",
+        style: { width: "100%", height: "210px", objectFit: "cover", borderRadius: "4px" },
+      });
+      const label = h("div", { style: { marginTop: "6px", fontSize: "12px" } }, [
+        `${it.title || it.original_title || "Untitled"}${it.year ? ` (${it.year})` : ""}`,
+      ]);
+      card.appendChild(img);
+      card.appendChild(label);
+      card.addEventListener("click", (e) => {
+        e.preventDefault();
+        cleanup();
+        resolve(it);
+      });
+      grid.appendChild(card);
+    }
+
+    body.appendChild(grid);
+    box.appendChild(body);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    function cleanup() {
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+    }
+
+    function onKey(e) {
+      if (e.key === "Escape") {
+        cleanup();
+        resolve(null);
+      }
+    }
+
+    closeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      cleanup();
+      resolve(null);
+    });
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        cleanup();
+        resolve(null);
+      }
+    });
+
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+async function pickTmdbPosterForQuery({ tmdbType, query, label, candidateKey }) {
+  const t = tmdbType === "tv" ? "tv" : "movie";
+  const q = String(query || "").trim();
+  if (!q) return null;
+
+  let items;
+  try {
+    items = t === "tv" ? await tmdbSearchTv(q) : await tmdbSearchMovies(q);
+  } catch (e) {
+    alert(`TMDB search failed: ${e?.message || e}`);
+    return null;
+  }
+
+  const candidates = (items || []).filter((it) => it && it.poster_path);
+  if (candidateKey) {
+    POSTER_CANDIDATE_INFO.set(candidateKey, { count: candidates.length, query: q });
+  }
+  if (candidates.length === 0) {
+    alert("No results with posters.");
+    return null;
+  }
+  if (candidates.length === 1) return candidates[0];
+  return openPosterPickerModal({ title: label || q, items: candidates, tmdbType: t });
+}
+
 // -----------------
 // TMDB auto-pick helpers (the ONLY allowed magic)
 // -----------------
@@ -417,7 +582,10 @@ async function undoLastAutoPosterRun() {
 
 async function tmdbAutoPickPoster({ tmdbType, query, size }) {
   const t = tmdbType === "tv" ? "tv" : "movie";
-  const q = String(query || "").trim();
+  const qRaw = String(query || "").trim();
+  if (!qRaw) return null;
+  if (looksLikeSampleTitle(qRaw)) return null;
+  const q = cleanTitleForSearch(qRaw) || qRaw;
   if (!q) return null;
 
   const items = t === "tv" ? await tmdbSearchTv(q) : await tmdbSearchMovies(q);
@@ -461,11 +629,17 @@ async function autoFetchMissingMoviePostersForLibrary({ libraryId, statusEl }) {
       const rawTitle = it?.title ?? it?.display_title ?? it?.name ?? "";
       const path = it?.file_path ?? it?.path ?? "";
       const title = (rawTitle && String(rawTitle).trim()) ? String(rawTitle) : basenameNoExt(path);
+      const searchTitle = buildPosterSearchTitle({ title, path });
+
+      if (looksLikeSampleTitle(title, path) || !searchTitle) {
+        done++;
+        continue;
+      }
 
       if (statusEl) statusEl.textContent = `Auto Fetch (movies) — ${done + 1} / ${total || "?"} … ${title}`;
 
       try {
-        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: title, size: "w342" });
+        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: searchTitle, size: "w342" });
         if (picked?.url) {
           await setPosterUrlForMediaFileId(mid, picked.url, "tmdb", picked.tmdbId);
           recordAutoPosterChange("movie", mid, null, picked.url);
@@ -510,13 +684,14 @@ async function autoFetchMissingTvPostersForLibrary({ libraryId, statusEl }) {
   for (const show of shows) {
     idx++;
     const showName = tvDisplayShowName(show);
+    const showQuery = buildPosterSearchTitle({ title: showName || show });
 
     // Show poster
-    if (!getPosterUrlForTvShow(show)) {
+    if (!getPosterUrlForTvShow(show) && showQuery && !looksLikeSampleTitle(showName, show)) {
       if (statusEl) statusEl.textContent = `Auto Fetch (tv) — show ${idx}/${shows.length} … ${showName}`;
       try {
         const prev = getPosterUrlForTvShow(show);
-        const picked = await tmdbAutoPickPoster({ tmdbType: "tv", query: showName || show, size: "w342" });
+        const picked = await tmdbAutoPickPoster({ tmdbType: "tv", query: showQuery, size: "w342" });
         if (picked?.url) {
           await setPosterUrlForTvShow(show, picked.url, "tmdb", picked.tmdbId);
           recordAutoPosterChange("tv_show", show, prev, picked.url);
@@ -535,11 +710,13 @@ async function autoFetchMissingTvPostersForLibrary({ libraryId, statusEl }) {
       if (getPosterUrlForTvSeason(show, s2)) continue;
 
       const q = `${showName} Season ${s2}`;
+      const seasonQuery = buildPosterSearchTitle({ title: q });
+      if (!seasonQuery || looksLikeSampleTitle(q)) continue;
       if (statusEl) statusEl.textContent = `Auto Fetch (tv) — ${showName} season ${s2} …`;
 
       try {
         const prev = getPosterUrlForTvSeason(show, s2);
-        const picked = await tmdbAutoPickPoster({ tmdbType: "tv", query: q, size: "w342" });
+        const picked = await tmdbAutoPickPoster({ tmdbType: "tv", query: seasonQuery, size: "w342" });
         if (picked?.url) {
           await setPosterUrlForTvSeason(show, s2, picked.url, "tmdb", picked.tmdbId);
           recordAutoPosterChange("tv_season", `${show}|${s2}`, prev, picked.url);
@@ -568,8 +745,6 @@ async function cacheTmdbPoster({ tmdbType, tmdbId, posterPath, size }) {
 }
 
 async function setPosterFlowForRow({ router, row, tmdbType }) {
-  const defaultQ = row.title || "";
-
   // Backward-compatible default: existing call sites behave as movie.
   // Allowed explicit values: "movie" | "tv".
   const t = tmdbType === "tv" || tmdbType === "movie" ? tmdbType : "movie";
@@ -583,46 +758,26 @@ async function setPosterFlowForRow({ router, row, tmdbType }) {
     return;
   }
 
-  const q = prompt(`TMDB search (${t}):`, defaultQ);
-  if (!q) return;
-
-  let items;
-  try {
-    items = t === "tv" ? await tmdbSearchTv(q) : await tmdbSearchMovies(q);
-  } catch (e) {
-    alert(`TMDB search failed: ${e?.message || e}`);
+  const rawTitle = row?.title || "";
+  const path = row?.path || row?.file_path || "";
+  if (looksLikeSampleTitle(rawTitle, path)) {
+    alert("Skipping sample item.");
+    return;
+  }
+  const q = buildPosterSearchTitle({ title: rawTitle, path });
+  if (!q) {
+    alert("No title to search.");
     return;
   }
 
-  if (!items.length) {
-    alert("No results.");
-    return;
-  }
-
-  const max = Math.min(10, items.length);
-  const previewLines = items
-    .slice(0, max)
-    .map((it, idx) => {
-      const yr = it.year ? ` (${it.year})` : "";
-      const p = it.poster_path ? " [poster]" : "";
-      return `${idx + 1}. ${it.title}${yr}${p}`;
-    })
-    .join("\n");
-
-  const pickRaw = prompt(`Pick a result (1-${max}):\n\n${previewLines}`, "1");
-  if (!pickRaw) return;
-
-  const pick = Number(pickRaw);
-  if (!Number.isFinite(pick) || pick < 1 || pick > max) {
-    alert("Invalid selection.");
-    return;
-  }
-
-  const chosen = items[pick - 1];
-  if (!chosen?.poster_path) {
-    alert("Chosen result has no poster.");
-    return;
-  }
+  const candidateKey = row?.id ? posterCandidateKeyForMediaId(row.id) : null;
+  const chosen = await pickTmdbPosterForQuery({
+    tmdbType: t,
+    query: q,
+    label: rawTitle || q,
+    candidateKey,
+  });
+  if (!chosen?.poster_path) return;
 
   let url;
   try {
@@ -709,6 +864,108 @@ function basenameNoExt(p) {
   const base = parts[parts.length - 1] || "";
   const dot = base.lastIndexOf(".");
   return dot > 0 ? base.slice(0, dot) : base;
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function looksLikeSampleTitle(...parts) {
+  const joined = parts.filter(Boolean).join(" ");
+  return /\bsamples?\b/i.test(joined);
+}
+
+function cleanTitleForSearch(raw) {
+  if (!raw) return "";
+  let s = String(raw);
+
+  // Remove bracketed/parenthetical noise.
+  s = s.replace(/[\[\(\{][^\]\)\}]*[\]\)\}]/g, " ");
+
+  // Normalize common separators.
+  s = s.replace(/[._]+/g, " ");
+  s = s.replace(/-+/g, " ");
+
+  // Drop common release tags and codecs.
+  const junkTokens = [
+    "1080p",
+    "720p",
+    "2160p",
+    "4k",
+    "hdr",
+    "hdr10",
+    "dolby",
+    "vision",
+    "dv",
+    "x264",
+    "x265",
+    "h264",
+    "h265",
+    "hevc",
+    "av1",
+    "bluray",
+    "blu",
+    "brrip",
+    "webrip",
+    "webdl",
+    "hdtv",
+    "dvdrip",
+    "dvdscr",
+    "cam",
+    "ts",
+    "tc",
+    "scr",
+    "yify",
+    "yts",
+    "rarbg",
+    "proper",
+    "repack",
+    "extended",
+    "unrated",
+    "remux",
+    "dubbed",
+    "subbed",
+    "multi",
+    "aac",
+    "dts",
+    "ddp",
+  ];
+  for (const token of junkTokens) {
+    const re = new RegExp(`\\b${escapeRegExp(token)}\\b`, "gi");
+    s = s.replace(re, " ");
+  }
+
+  // Drop season/episode tokens and years.
+  s = s.replace(/\b(s\d{1,2}e\d{1,2}|s\d{1,2}|e\d{1,2})\b/gi, " ");
+  s = s.replace(/\b(19|20)\d{2}\b/g, " ");
+
+  // Remove leftover punctuation.
+  s = s.replace(/[^a-zA-Z0-9'\s]/g, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
+function buildPosterSearchTitle({ title, path }) {
+  const raw = (title && String(title).trim()) ? String(title).trim() : basenameNoExt(path);
+  const cleaned = cleanTitleForSearch(raw);
+  return cleaned || raw;
+}
+
+function tmdbImageUrl(path, size = "w185") {
+  if (!path) return "";
+  const p = String(path).trim();
+  if (!p) return "";
+  return `${TMDB_IMAGE_BASE}/${size}${p}`;
+}
+
+function normalizeLibraryTypeInput(raw) {
+  const v = String(raw || "").trim().toLowerCase();
+  if (!v) return "";
+  if (v === "movie" || v === "movies") return "movie";
+  if (v === "tv" || v === "show" || v === "shows" || v === "tvshow" || v === "tvshows" || v === "tv show" || v === "tv shows") {
+    return "tv";
+  }
+  return v;
 }
 
 // Helper: shorten long paths but keep filename
@@ -984,9 +1241,20 @@ function DashboardPage() {
         posterTd.appendChild(
           makePosterImg(posterUrl, {
             isSet: !!posterUrl,
-            onClick: () => setPosterFlowForRow({ router, row: { id: mediaId, title } }),
+            onClick: () => setPosterFlowForRow({ router, row: { id: mediaId, title, path } }),
           })
         );
+        const badge = makeMultiPosterBadge();
+        posterTd.appendChild(badge);
+        const searchTitle = buildPosterSearchTitle({ title, path });
+        if (!looksLikeSampleTitle(title, path)) {
+          attachMultiPosterBadge({
+            badgeEl: badge,
+            key: posterCandidateKeyForMediaId(mediaId),
+            tmdbType: "movie",
+            query: searchTitle,
+          });
+        }
         tr.appendChild(posterTd);
         // Title column
         tr.appendChild(h("td", {}, [title]));
@@ -1293,7 +1561,7 @@ function PostersPage({ router, query }) {
   wrap.appendChild(
     renderPageTitle(
       `Posters — Library ${libraryId}`,
-      "Movies: set posters per item. This is explicit: you run a TMDB search and pick a result. No guessing, no bulk auto-selection."
+      "Movies: set posters per item. Click a poster to auto-search by title and pick a match. No guessing, no bulk auto-selection."
     )
   );
 
@@ -1458,7 +1726,9 @@ function PostersPage({ router, query }) {
       const mediaId = String(it.mediaId);
       const prev = getPosterUrlForMediaFileId(mediaId);
       try {
-        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: it.title, size: "w342" });
+        const searchTitle = buildPosterSearchTitle({ title: it.title, path: it.path });
+        if (!searchTitle || looksLikeSampleTitle(it.title, it.path)) continue;
+        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: searchTitle, size: "w342" });
         if (picked?.url) {
           await setPosterUrlForMediaFileId(mediaId, picked.url, "tmdb", picked.tmdbId);
           recordAutoPosterChange("movie", mediaId, prev, picked.url);
@@ -1503,7 +1773,9 @@ function PostersPage({ router, query }) {
       const prev = getPosterUrlForMediaFileId(mediaId);
       if (prev) continue; // only fill missing
       try {
-        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: it.title, size: "w342" });
+        const searchTitle = buildPosterSearchTitle({ title: it.title, path: it.path });
+        if (!searchTitle || looksLikeSampleTitle(it.title, it.path)) continue;
+        const picked = await tmdbAutoPickPoster({ tmdbType: "movie", query: searchTitle, size: "w342" });
         if (picked?.url) {
           await setPosterUrlForMediaFileId(mediaId, picked.url, "tmdb", picked.tmdbId);
           recordAutoPosterChange("movie", mediaId, prev, picked.url);
@@ -1572,7 +1844,7 @@ function PostersPage({ router, query }) {
 
     const top = h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" } });
     top.appendChild(h("div", { style: { fontWeight: "600" } }, [`Work Queue: ${queueIndex + 1} / ${total}`]));
-    top.appendChild(h("div", { style: { color: "#666" } }, ["Manual: search TMDB and pick a match. No auto selection."]));
+    top.appendChild(h("div", { style: { color: "#666" } }, ["Auto-search by title. If multiple matches exist, pick a poster."]));
     queueBox.appendChild(top);
 
     const row = h("div", { style: { display: "flex", gap: "12px", alignItems: "flex-start", marginTop: "10px" } });
@@ -1582,9 +1854,20 @@ function PostersPage({ router, query }) {
     posterCell.appendChild(
       makePosterImg(posterUrl, {
         isSet: !!posterUrl,
-        onClick: () => setPosterFlowForRow({ router, row: { id: cur.mediaId, title: cur.title }, tmdbType: "movie" }),
+        onClick: () => setPosterFlowForRow({ router, row: { id: cur.mediaId, title: cur.title, path: cur.path }, tmdbType: "movie" }),
       })
     );
+    const queueBadge = makeMultiPosterBadge();
+    posterCell.appendChild(queueBadge);
+    const queueSearchTitle = buildPosterSearchTitle({ title: cur.title, path: cur.path });
+    if (!looksLikeSampleTitle(cur.title, cur.path)) {
+      attachMultiPosterBadge({
+        badgeEl: queueBadge,
+        key: posterCandidateKeyForMediaId(cur.mediaId),
+        tmdbType: "movie",
+        query: queueSearchTitle,
+      });
+    }
     row.appendChild(posterCell);
 
     const meta = h("div", { style: { flex: "1" } });
@@ -1595,11 +1878,11 @@ function PostersPage({ router, query }) {
 
     const actions = h("div", { style: { display: "flex", flexDirection: "column", gap: "6px" } });
 
-    const searchSet = h("button", {}, ["Search & Set Poster"]);
+    const searchSet = h("button", {}, ["Find & Set Poster"]);
     searchSet.addEventListener("click", async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      await setPosterFlowForRow({ router, row: { id: cur.mediaId, title: cur.title }, tmdbType: "movie" });
+      await setPosterFlowForRow({ router, row: { id: cur.mediaId, title: cur.title, path: cur.path }, tmdbType: "movie" });
       // Refresh the table and queue view after setting.
       load();
       renderQueue();
@@ -1748,9 +2031,20 @@ function PostersPage({ router, query }) {
         posterTd.appendChild(
           makePosterImg(posterUrl, {
             isSet: !!posterUrl,
-            onClick: () => setPosterFlowForRow({ router, row: { id: mediaId, title }, tmdbType: "movie" }),
+            onClick: () => setPosterFlowForRow({ router, row: { id: mediaId, title, path }, tmdbType: "movie" }),
           })
         );
+        const badge = makeMultiPosterBadge();
+        posterTd.appendChild(badge);
+        const searchTitle = buildPosterSearchTitle({ title, path });
+        if (!looksLikeSampleTitle(title, path)) {
+          attachMultiPosterBadge({
+            badgeEl: badge,
+            key: posterCandidateKeyForMediaId(mediaId),
+            tmdbType: "movie",
+            query: searchTitle,
+          });
+        }
         tr.appendChild(posterTd);
 
         tr.appendChild(h("td", { title }, [displayTitle]));
@@ -1764,7 +2058,7 @@ function PostersPage({ router, query }) {
         setPosterBtn.addEventListener("click", async (e) => {
           e.preventDefault();
           e.stopPropagation();
-          await setPosterFlowForRow({ router, row: { id: mediaId, title }, tmdbType: "movie" });
+          await setPosterFlowForRow({ router, row: { id: mediaId, title, path }, tmdbType: "movie" });
         });
 
         const clearPosterBtn = h("button", { style: { marginLeft: "6px" } }, ["Clear Poster"]);
@@ -2229,7 +2523,7 @@ function LibraryBrowsePage({ router, libraryId, query }) {
     let t = getLibraryTypeForId(idStr);
     if (t !== "movie" && t !== "tv") {
       const typed = prompt("Library type is unknown here. Type movie or tv (no fallback):", "");
-      const v = String(typed || "").trim().toLowerCase();
+      const v = normalizeLibraryTypeInput(typed);
       if (v !== "movie" && v !== "tv") return;
       t = v;
       setLibraryTypeForId(idStr, t);
@@ -2382,9 +2676,20 @@ function LibraryBrowsePage({ router, libraryId, query }) {
             posterTd.appendChild(
               makePosterImg(posterUrl, {
                 isSet: !!posterUrl,
-                onClick: () => setPosterFlowForRow({ router, row: { id: mediaId, title }, tmdbType: libType }),
+                onClick: () => setPosterFlowForRow({ router, row: { id: mediaId, title, path }, tmdbType: libType }),
               })
             );
+            const badge = makeMultiPosterBadge();
+            posterTd.appendChild(badge);
+            const searchTitle = buildPosterSearchTitle({ title, path });
+            if (!looksLikeSampleTitle(title, path) && libType === "movie") {
+              attachMultiPosterBadge({
+                badgeEl: badge,
+                key: posterCandidateKeyForMediaId(mediaId),
+                tmdbType: "movie",
+                query: searchTitle,
+              });
+            }
           }
           tr.appendChild(posterTd);
 
@@ -2420,7 +2725,7 @@ function LibraryBrowsePage({ router, libraryId, query }) {
             setPosterBtn.addEventListener("click", async (e) => {
               e.preventDefault();
               e.stopPropagation();
-              await setPosterFlowForRow({ router, row: { id: mediaId, title }, tmdbType: libType });
+              await setPosterFlowForRow({ router, row: { id: mediaId, title, path }, tmdbType: libType });
             });
 
             const clearPosterBtn = h("button", { style: { marginLeft: "6px" } }, ["Clear Poster"]);
@@ -2545,6 +2850,17 @@ function LibraryBrowsePage({ router, libraryId, query }) {
             onClick: () => setPosterFlowForTvShow({ router, showSlug: s.show, showName }),
           })
         );
+        const showBadge = makeMultiPosterBadge();
+        posterTd.appendChild(showBadge);
+        const showQuery = buildPosterSearchTitle({ title: showName || s.show });
+        if (!looksLikeSampleTitle(showName, s.show)) {
+          attachMultiPosterBadge({
+            badgeEl: showBadge,
+            key: posterCandidateKeyForShow(s.show),
+            tmdbType: "tv",
+            query: showQuery,
+          });
+        }
         tr.appendChild(posterTd);
 
         tr.appendChild(h("td", {}, [showName]));
